@@ -1,0 +1,6 @@
+fip-c (0.4.1-1) noble; urgency=medium
+
+  * Initial Ubuntu package.
+  * Ship prebuilt static binary fip-c.
+
+ -- Marc Zweiler <marc.zweiler@outlook.at>  Mon, 31 Aug 2026 21:00:00 +0200
