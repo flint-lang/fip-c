@@ -41,11 +41,14 @@ pub fn main(init: std.process.Init) !void {
     try toolchain.defineSystemIncludes();
     try compilation.initSearchPath(driver.includes.items, false);
 
-    try parse_file(compilation);
+    var file_tree = try parse_file(&compilation);
+    defer file_tree.deinit();
+
+    try file_tree.dump(out_terminal);
 }
 
-fn parse_file(compilation: aro.Compilation) !aro.Tree {
-    var preproc = try aro.Preprocessor.init(&compilation, .testing);
+fn parse_file(compilation: *aro.Compilation) !aro.Tree {
+    var preproc = try aro.Preprocessor.init(compilation, .testing);
     defer preproc.deinit();
     try preproc.addBuiltinMacros();
     const builtin_macros = try compilation.generateBuiltinMacros(.include_system_defines);
