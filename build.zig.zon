@@ -1,0 +1,17 @@
+.{
+    .name = .fip_zig,
+    .version = "0.0.1",
+    .fingerprint = 0xec2ce9b40b00cd8,
+    .minimum_zig_version = "0.16.0",
+    .dependencies = .{
+        .aro = .{
+            .url = "git+https://github.com/Vexu/arocc.git#5f5a050569a95ecc40a426f0c3666ae7ef987ede",
+            .hash = "aro-0.0.0-JSD1Qi7QNgDnfcrdEJf82v3o6MhZySjYVrtdfEf3E4Se",
+        },
+        .fip = .{
+            .url = "git+https://github.com/flint-lang/fip.git#9e4b96fbd256a2e1b851ec4b0524578961193a1e",
+            .hash = "fip-0.4.1-jXH3OcyUAgBgdmdHbz_pbX5o8Zw087io05rhoX1fYYcZ",
+        },
+    },
+    .paths = .{""},
+}

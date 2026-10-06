@@ -33,3 +33,5 @@ This repository is contains the Flint Interop Module for the C programming langu
 ## Introduction
 
 The `fip-c` binary is a parser for the C programming language which communicates over the Flint Interop Protocol to provide interop support with the C language.
+
+The `fip-c` Interop Module is written in `Zig` and uses [arocc](https://github.com/Vexu/arocc/tree/master) as its C parser. The old `fip-c` binary used `libclang` which was a very heavy dependency. This new from-scratch rewrite of the `fip-c` interop module aims to be simpler, more lightweight and more capable as a result.
