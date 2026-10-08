@@ -19,8 +19,8 @@ pub fn parse_file(
     const builtin_macros = try compilation.generateBuiltinMacros(.include_system_defines);
     _ = try preproc.preprocess(builtin_macros);
 
-    const main_c = try compilation.addSourceFromPath(file_path);
-    const eof = try preproc.preprocess(main_c);
+    const source = try compilation.addSourceFromPath(file_path);
+    const eof = try preproc.preprocess(source);
     try preproc.addToken(eof);
 
     var tree: aro.Tree = try aro.Parser.parse(&preproc);
@@ -31,6 +31,10 @@ pub fn parse_file(
     errdefer free_symbol_list(allocator, &symbols);
 
     for (tree.root_decls.items) |*decl| {
+        if (decl.loc(&tree).id != source.id) {
+            // Only collect files from the actual pointed-to source file
+            continue;
+        }
         const decl_node: aro.Tree.Node = decl.get(&tree);
         try symbols.append(allocator, .{
             .line_number = decl.loc(&tree).line,
