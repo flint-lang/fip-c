@@ -19,6 +19,7 @@ pub fn build(b: *std.Build) void {
         .optimize = optimize,
         .root_source_file = fip_dep.path("fip.h"),
     });
+    fip_c.defineCMacro("FIP_SLAVE", null);
     fip_c.addIncludePath(fip_dep.builder.dependency("tomlc17", .{}).path("src"));
 
     const exe = b.addExecutable(.{
@@ -31,9 +32,9 @@ pub fn build(b: *std.Build) void {
         .use_llvm = true,
         .use_lld = true,
     });
+    b.installArtifact(exe);
     exe.step.dependOn(&fip_c.step);
     exe.root_module.addImport("fip", fip_c.createModule());
-    b.installArtifact(exe);
     exe.root_module.linkLibrary(fip_dep.artifact("fip"));
     exe.installLibraryHeaders(fip_dep.artifact("fip"));
 
