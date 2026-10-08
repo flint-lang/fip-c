@@ -4,6 +4,9 @@ const fip = @import("fip");
 
 const main = @import("main.zig");
 
+/// All memory owned by FIP structures needs to be allocated using the C allocator
+const fip_alloc = std.heap.c_allocator;
+
 pub fn parse_file(
     allocator: std.mem.Allocator,
     terminal: std.Io.Terminal,
@@ -25,25 +28,35 @@ pub fn parse_file(
     try tree.dump(terminal);
 
     var symbols: std.ArrayList(main.CSymbol) = .empty;
+    errdefer free_symbol_list(allocator, &symbols);
 
     for (tree.root_decls.items) |*decl| {
         const decl_node: aro.Tree.Node = decl.get(&tree);
-        var symbol: main.CSymbol = .{
+        try symbols.append(allocator, .{
             .line_number = decl.loc(&tree).line,
-        };
-        @memcpy(symbol.source_file_path[0..file_path.len], file_path);
+        });
+        const symbol: *main.CSymbol = &symbols.items[symbols.items.len - 1];
+        const path_len = @min(file_path.len, symbol.source_file_path.len - 1);
+        @memcpy(symbol.source_file_path[0..path_len], file_path);
         switch (decl_node) {
             .function => |function| {
                 const fn_type: aro.Type.Func = function.qt.base(compilation).type.func;
                 std.debug.print("Found function: {s}\n", .{tree.tokSlice(function.name_tok)});
                 symbol.type = fip.FIP_SYM_FUNCTION;
-                var sym_fn: *fip.fip_sig_fn_t = &symbol.sig.@"fn";
+                const sym_fn: *fip.fip_sig_fn_t = &symbol.sig.@"fn";
                 sym_fn.args_len = @intCast(fn_type.params.len);
-                sym_fn.args = (try allocator.alloc(fip.fip_sig_fn_arg_t, fn_type.params.len)).ptr;
-                for (fn_type.params, sym_fn.args[0..fn_type.params.len]) |*param, *arg| {
+                const args: []fip.fip_sig_fn_arg_t =
+                    if (fn_type.params.len > 0)
+                        (try fip_alloc.alloc(fip.fip_sig_fn_arg_t, fn_type.params.len))
+                    else
+                        &.{};
+                @memset(std.mem.sliceAsBytes(args), 0);
+                if (args.len > 0) sym_fn.args = args.ptr;
+                for (fn_type.params, args) |*param, *arg| {
                     const param_name: []const u8 = param.name.lookup(compilation);
-                    @memcpy(arg.name[0..param_name.len], param_name);
-                    if (!try get_type(allocator, compilation, &param.qt, &arg.type)) {
+                    @memcpy(arg.name[0..@min(param_name.len, 127)], param_name);
+                    if (!try get_type(compilation, &param.qt, &arg.type, &.{})) {
+                        free_symbol_list(allocator, &symbols);
                         return null;
                     }
                 }
@@ -95,11 +108,112 @@ pub fn parse_file(
     return collection;
 }
 
+fn free_symbol(symbol: *main.CSymbol) void {
+    switch (symbol.type) {
+        fip.FIP_SYM_FUNCTION => {
+            const fn_sig = &symbol.sig.@"fn";
+            if (fn_sig.args_len > 0 and fn_sig.args != null) {
+                for (fn_sig.args[0..fn_sig.args_len]) |*arg| {
+                    fip.fip_free_type(&arg.type);
+                }
+                fip_alloc.free(fn_sig.args[0..fn_sig.args_len]);
+            }
+            fn_sig.args = null;
+            fn_sig.args_len = 0;
+            if (fn_sig.rets_len > 0 and fn_sig.rets != null) {
+                for (fn_sig.rets[0..fn_sig.rets_len]) |*ret| {
+                    fip.fip_free_type(ret);
+                }
+                fip_alloc.free(fn_sig.rets[0..fn_sig.rets_len]);
+            }
+            fn_sig.rets = null;
+            fn_sig.rets_len = 0;
+        },
+        fip.FIP_SYM_DATA => {
+            const data_sig = &symbol.sig.data;
+            if (data_sig.value_count > 0) {
+                if (data_sig.value_names != null) {
+                    for (data_sig.value_names[0..data_sig.value_count]) |name| {
+                        if (name != null) {
+                            const str: [*:0]const u8 = @ptrCast(name);
+                            fip_alloc.free(str[0 .. std.mem.len(str) + 1]);
+                        }
+                    }
+                    fip_alloc.free(data_sig.value_names[0..data_sig.value_count]);
+                }
+                if (data_sig.value_types != null) {
+                    for (data_sig.value_types[0..data_sig.value_count]) |*t| {
+                        fip.fip_free_type(t);
+                    }
+                    fip_alloc.free(data_sig.value_types[0..data_sig.value_count]);
+                }
+                data_sig.value_count = 0;
+            }
+        },
+        fip.FIP_SYM_ENUM => {
+            const enum_sig = &symbol.sig.enumt;
+            if (enum_sig.value_count > 0) {
+                if (enum_sig.tags != null) {
+                    for (enum_sig.tags[0..enum_sig.value_count]) |tag| {
+                        if (tag != null) {
+                            const str: [*:0]const u8 = @ptrCast(tag);
+                            fip_alloc.free(str[0 .. std.mem.len(str) + 1]);
+                        }
+                    }
+                    fip_alloc.free(enum_sig.tags[0..enum_sig.value_count]);
+                }
+                if (enum_sig.values != null) {
+                    fip_alloc.free(enum_sig.values[0..enum_sig.value_count]);
+                }
+                enum_sig.value_count = 0;
+            }
+        },
+        else => {},
+    }
+}
+
+pub fn free_symbols(allocator: std.mem.Allocator, symbols: []main.CSymbol) void {
+    for (symbols) |*symbol| {
+        free_symbol(symbol);
+    }
+    allocator.free(symbols);
+}
+
+fn free_symbol_list(allocator: std.mem.Allocator, symbols: *std.ArrayList(main.CSymbol)) void {
+    for (symbols.items) |*symbol| {
+        free_symbol(symbol);
+    }
+    symbols.deinit(allocator);
+}
+
+fn free_type_array(fields: []fip.fip_type_t) void {
+    for (fields) |*field| {
+        fip.fip_free_type(field);
+    }
+    if (fields.len > 0) {
+        fip_alloc.free(fields);
+    }
+}
+
+fn findInStack(stack: []const []const u8, name: []const u8) ?usize {
+    if (name.len == 0) {
+        return null;
+    }
+    var i = stack.len;
+    while (i > 0) {
+        i -= 1;
+        if (std.mem.eql(u8, stack[i], name)) {
+            return i;
+        }
+    }
+    return null;
+}
+
 fn get_type(
-    allocator: std.mem.Allocator,
     compilation: *const aro.Compilation,
     qt_in: *const aro.QualType,
     out: *fip.fip_type_t,
+    type_stack: []const []const u8,
 ) !bool {
     const base = qt_in.base(compilation);
     const in = base.type;
@@ -115,7 +229,7 @@ fn get_type(
             .u = .{ .prim = fip.FIP_BOOL },
         },
         .nullptr_t => blk: {
-            const base_type: *fip.fip_type_t = try allocator.create(fip.fip_type_t);
+            const base_type: *fip.fip_type_t = try fip_alloc.create(fip.fip_type_t);
             base_type.* = .{
                 .is_mutable = false,
                 .type = fip.FIP_TYPE_PRIMITIVE,
@@ -229,8 +343,33 @@ fn get_type(
             return false;
         },
         .pointer => |ptr| blk: {
-            const inner: *fip.fip_type_t = try allocator.create(fip.fip_type_t);
-            if (!try get_type(allocator, compilation, &ptr.child, inner)) {
+            // Check for recursive reference through pointer
+            const child_base = ptr.child.base(compilation);
+            switch (child_base.type) {
+                .@"struct" => |r| if (findInStack(type_stack, r.name.lookup(compilation))) |_| {
+                    const levels_back = 1;
+                    break :blk .{
+                        .is_mutable = !qt_in.@"const",
+                        .type = fip.FIP_TYPE_RECURSIVE,
+                        .u = .{ .recursive = .{ .levels_back = @intCast(levels_back) } },
+                    };
+                },
+                .@"union" => |u| if (findInStack(type_stack, u.name.lookup(compilation))) |_| {
+                    const levels_back = 1;
+                    break :blk .{
+                        .is_mutable = !qt_in.@"const",
+                        .type = fip.FIP_TYPE_RECURSIVE,
+                        .u = .{ .recursive = .{ .levels_back = @intCast(levels_back) } },
+                    };
+                },
+                else => {},
+            }
+
+            // Normal pointer: expand child
+            const inner: *fip.fip_type_t = try fip_alloc.create(fip.fip_type_t);
+            errdefer fip_alloc.destroy(inner);
+            if (!try get_type(compilation, &ptr.child, inner, type_stack)) {
+                fip_alloc.destroy(inner);
                 return false;
             }
             break :blk .{
@@ -256,8 +395,10 @@ fn get_type(
                     return false;
                 },
             };
-            const inner: *fip.fip_type_t = try allocator.create(fip.fip_type_t);
-            if (!try get_type(allocator, compilation, &arr.elem, inner)) {
+            const inner: *fip.fip_type_t = try fip_alloc.create(fip.fip_type_t);
+            errdefer fip_alloc.destroy(inner);
+            if (!try get_type(compilation, &arr.elem, inner, type_stack)) {
+                fip_alloc.destroy(inner);
                 return false;
             }
             break :blk .{
@@ -280,18 +421,53 @@ fn get_type(
             var out_struct = fip.fip_type_struct_t{};
 
             // Copy struct name
-            const sname = if (rec.name == .empty) "" else rec.name.lookup(compilation);
+            const sname = rec.name.lookup(compilation);
             @memcpy(out_struct.name[0..@min(sname.len, 127)], sname);
-            if (sname.len < 127) out_struct.name[sname.len] = 0;
+            if (sname.len < 127) {
+                out_struct.name[sname.len] = '\x00';
+            }
+
+            // Check for recursion before expanding fields
+            if (findInStack(type_stack, sname) != null) {
+                break :blk .{
+                    .is_mutable = !qt_in.@"const",
+                    .type = fip.FIP_TYPE_RECURSIVE,
+                    .u = .{ .recursive = .{ .levels_back = 1 } },
+                };
+            }
+
+            // Build new stack if named
+            var new_stack_allocated: ?std.ArrayList([]const u8) = null;
+            const new_stack =
+                if (sname.len > 0) blk_ns: {
+                    var list = std.ArrayList([]const u8).empty;
+                    try list.appendSlice(fip_alloc, type_stack);
+                    try list.append(fip_alloc, sname);
+                    new_stack_allocated = list;
+                    break :blk_ns list.items;
+                } else type_stack;
+            defer if (new_stack_allocated) |*lst| {
+                lst.deinit(fip_alloc);
+            };
 
             out_struct.field_count = @intCast(rec.fields.len);
-            out_struct.fields = (try allocator.alloc(fip.fip_type_t, rec.fields.len)).ptr;
+            const fields: []fip.fip_type_t =
+                if (rec.fields.len > 0)
+                    (try fip_alloc.alloc(fip.fip_type_t, rec.fields.len))
+                else
+                    &.{};
+            // Zero so that partially-built field entries are FIP_TYPE_PRIMITIVE
+            // no-ops for fip_free_type on the error path.
+            @memset(std.mem.sliceAsBytes(fields), 0);
+            if (fields.len > 0) {
+                out_struct.fields = fields.ptr;
+            }
+            errdefer free_type_array(fields[0..out_struct.field_count]);
 
             // Fill each field's type (in declaration order)
-            for (rec.fields, out_struct.fields[0..rec.fields.len]) |*field, *ftype| {
-                if (!try get_type(allocator, compilation, &field.qt, ftype)) {
-                    // Don't forget to free if you want to be clean on error
-                    allocator.free(out_struct.fields[0..out_struct.field_count]);
+            for (rec.fields, fields) |*field, *ftype| {
+                if (!try get_type(compilation, &field.qt, ftype, new_stack)) {
+                    free_type_array(fields[0..out_struct.field_count]);
                     return false;
                 }
             }
@@ -312,13 +488,21 @@ fn get_type(
                 .bit_width = 32,
                 .is_signed = 1,
                 .value_count = @intCast(enum_type.fields.len),
-                .values = (try allocator.alloc(usize, enum_type.fields.len)).ptr,
+                .values = null,
             };
+            const values: []usize =
+                if (enum_type.fields.len > 0)
+                    (try fip_alloc.alloc(usize, enum_type.fields.len))
+                else
+                    &.{};
+            if (values.len > 0) {
+                out_enum.values = values.ptr;
+            }
 
             const enum_name = enum_type.name.lookup(compilation);
             @memcpy(out_enum.name[0..@min(enum_name.len, 127)], enum_name);
 
-            for (enum_type.fields, out_enum.values[0..enum_type.fields.len]) |*field, *value| {
+            for (enum_type.fields, values) |*field, *value| {
                 // TODO: Set fields of enum values
                 _ = field;
                 _ = value;

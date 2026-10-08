@@ -54,6 +54,11 @@ pub var symbol_collections: std.ArrayList(CSymbolCollection) = .empty;
 
 pub fn main(init: std.process.Init) !u8 {
     defer symbol_collections.deinit(init.gpa);
+    defer {
+        for (symbol_collections.items) |*collection| {
+            parser.free_symbols(init.gpa, collection.symbols);
+        }
+    }
 
     var writer = std.Io.File.stdout().writer(init.io, &.{});
 
@@ -99,10 +104,14 @@ pub fn main(init: std.process.Init) !u8 {
         return 1;
     }
 
-    if (try parser.parse_file(init.gpa, out_terminal, &compilation, "main.c")) |collection| {
-        try symbol_collections.append(init.gpa, collection);
+    const file: []const u8 = "main.c";
+    if (try parser.parse_file(init.gpa, out_terminal, &compilation, file)) |collection| {
+        symbol_collections.append(init.gpa, collection) catch |err| {
+            parser.free_symbols(init.gpa, collection.symbols);
+            return err;
+        };
     } else {
-        fip.fip_print(ID, fip.FIP_ERROR, "Unable to parse file '{s}'");
+        fip.fip_print(ID, fip.FIP_ERROR, "Unable to parse file '%s'", file.ptr);
         return 1;
     }
 
