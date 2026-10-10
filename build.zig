@@ -1,6 +1,6 @@
 const std = @import("std");
 
-pub fn build(b: *std.Build) void {
+pub fn build(b: *std.Build) !void {
     const target = b.graph.host;
     const optimize = b.standardOptimizeOption(.{});
 
@@ -44,6 +44,35 @@ pub fn build(b: *std.Build) void {
     defines.addOption([]const u8, "version", @import("build.zig.zon").version);
     defines.addOption([]const u8, "hash", commit_hash);
     defines.addOption([]const u8, "date", build_date);
+    if (aro_dep.builder.build_root.handle.openDir(b.graph.io, "include", .{ .iterate = true })) |aro_files_dir| {
+        defer aro_files_dir.close(b.graph.io);
+        var aro_file_names: std.ArrayList([]const u8) = .empty;
+        var aro_file_contents: std.ArrayList([]const u8) = .empty;
+        defer aro_file_contents.deinit(b.allocator);
+
+        var iter = aro_files_dir.iterate();
+        while (try iter.next(b.graph.io)) |entry| {
+            std.debug.assert(entry.kind == .file);
+            std.debug.assert(std.mem.eql(u8, entry.name[entry.name.len - ".h".len ..], ".h"));
+            const file_content: []const u8 = try aro_files_dir.readFileAlloc(
+                b.graph.io,
+                entry.name,
+                b.allocator,
+                .limited(std.math.maxInt(u16)),
+            );
+            try aro_file_names.append(b.allocator, entry.name);
+            try aro_file_contents.append(b.allocator, file_content);
+        }
+
+        const AroFiles = struct { names: []const []const u8, contents: []const []const u8 };
+        defines.addOption(AroFiles, "aro_files", .{
+            .names = try aro_file_names.toOwnedSlice(b.allocator),
+            .contents = try aro_file_contents.toOwnedSlice(b.allocator),
+        });
+    } else |err| {
+        std.log.err("Unable to open 'include' dir of 'aro' dependency", .{});
+        return err;
+    }
 
     const imports: []const std.Build.Module.Import = &.{
         .{ .name = "defines", .module = defines.createModule() },
@@ -70,13 +99,6 @@ pub fn build(b: *std.Build) void {
     b.getInstallStep().dependOn(&b.addInstallArtifact(exe, .{
         .h_dir = .{ .override = .header },
     }).step);
-
-    // Optional; this will make aro's builtin includes (the `include` directory of this repo) available to `Toolchain`
-    b.installDirectory(.{
-        .source_dir = aro_dep.path("include"),
-        .install_dir = .prefix,
-        .install_subdir = "include/arocc/include",
-    });
 
     const tests_step = b.step("test", "Run tests");
     const mode_tests = b.addTest(.{

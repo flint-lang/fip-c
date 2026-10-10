@@ -1,4 +1,5 @@
 const std = @import("std");
+const builtin = @import("builtin");
 const defines = @import("defines");
 const aro = @import("aro");
 const fip = @import("fip");
@@ -11,7 +12,7 @@ const toml = @import("toml.zig");
 pub const MODULE_NAME = "fip-c";
 pub const MAX_SYMBOLS = 1000;
 
-pub export var LOG_LEVEL: fip.LogLevel = if (@import("builtin").mode == .Debug) .debug else .warn;
+pub export var LOG_LEVEL: fip.LogLevel = if (builtin.mode == .Debug) .debug else .warn;
 
 /// fip_module_config_t
 pub const ModuleConfig = struct {
@@ -84,13 +85,45 @@ pub fn main(init: std.process.Init) !u8 {
     };
     defer res.deinit();
 
+    const cache_env_var = if (builtin.target.os.tag == .windows) "LOCALAPPDATA" else "XDG_CACHE_HOME";
+    const cache_env_path: []const u8 = init.environ_map.get(cache_env_var) orelse {
+        std.log.err("Failed to get environment variable '{s}'", .{cache_env_var});
+        return 1;
+    };
+    const cache_path: []const u8 =
+        if (builtin.target.os.tag == .windows)
+            try std.Io.Dir.path.resolve(init.gpa, &.{ cache_env_path, "Flint", "Cache", "fip-c" })
+        else
+            try std.Io.Dir.path.resolve(init.gpa, &.{ cache_env_path, "flint", "fip-c" });
+    defer init.gpa.free(cache_path);
+
+    const aro_include_path: []const u8 = try std.Io.Dir.path.resolve(init.gpa, &.{ cache_path, "include" });
+    defer init.gpa.free(aro_include_path);
+
+    const aro_include_dir = try std.Io.Dir.cwd().createDirPathOpen(init.io, aro_include_path, .{});
+    defer aro_include_dir.close(init.io);
+    for (defines.aro_files.names, defines.aro_files.contents) |name, content| {
+        aro_include_dir.writeFile(init.io, .{
+            .sub_path = name,
+            .data = content,
+            .flags = .{
+                .truncate = false,
+                .exclusive = true,
+            },
+        }) catch |err| {
+            if (err != error.PathAlreadyExists) {
+                return err;
+            }
+        };
+    }
+
     if (res.args.help != 0) {
         try printHelp(stdout);
         return 0;
     }
     if (res.args.version != 0) {
         try stdout.print("fip-c v{s} ({s}, {s})", .{ defines.version, defines.hash, defines.date });
-        if (@import("builtin").mode == .Debug) {
+        if (builtin.mode == .Debug) {
             try stdout.print(" [debug]", .{});
         }
         try stdout.print("\n └─ Flint Interop Protocol v{d}.{d}.{d}\n", .{ fip.MAJOR, fip.MINOR, fip.PATCH });
@@ -139,7 +172,7 @@ pub fn main(init: std.process.Init) !u8 {
     var driver: aro.Driver = .{
         .comp = &compilation,
         .diagnostics = &diagnostics,
-        .resource_dir = "zig-out/include/arocc",
+        .resource_dir = cache_path,
     };
     defer driver.deinit();
 
