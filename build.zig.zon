@@ -9,8 +9,8 @@
             .hash = "aro-0.0.0-JSD1Qi7QNgDnfcrdEJf82v3o6MhZySjYVrtdfEf3E4Se",
         },
         .fip = .{
-            .url = "git+https://github.com/flint-lang/fip.git#9e4b96fbd256a2e1b851ec4b0524578961193a1e",
-            .hash = "fip-0.4.1-jXH3OcyUAgBgdmdHbz_pbX5o8Zw087io05rhoX1fYYcZ",
+            .url = "git+https://github.com/flint-lang/fip.git#457fc9eb494a0667d71135389cee44060e7550e5",
+            .hash = "fip-0.4.1-jXH3OeaaAgDe44wOlRNTSg0o4yz5WkLlJ7Qr5kgLt_iA",
         },
     },
     .paths = .{""},

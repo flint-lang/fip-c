@@ -9,22 +9,21 @@ const toml = @import("toml.zig");
 pub const MODULE_NAME = "fip-c";
 pub const MAX_SYMBOLS = 1000;
 
-pub export var LOG_LEVEL: fip.fip_log_level_e = if (@import("builtin").mode == .Debug) fip.FIP_DEBUG else fip.FIP_WARN;
+pub export var LOG_LEVEL: fip.LogLevel = if (@import("builtin").mode == .Debug) .debug else .warn;
 
 /// fip_module_config_t
 pub const ModuleConfig = struct {
     tag: [128]u8 = @splat(0),
     headers: [][]u8 = &.{},
     command: [][]u8 = &.{},
-    output: [@as(usize, @intCast(fip.FIP_PATH_SIZE)) + 1]u8 = @splat(0),
+    output: [@as(usize, @intCast(fip.PATH_SIZE)) + 1]u8 = @splat(0),
 };
 
 /// c_symbol_t
 pub const CSymbol = struct {
     source_file_path: [512]u8 = @splat(0),
     line_number: u32,
-    type: fip.fip_msg_symbol_type_e = std.mem.zeroes(fip.fip_msg_symbol_type_e),
-    sig: fip.fip_sig_u = std.mem.zeroes(fip.fip_sig_u),
+    sig: fip.Signature = std.mem.zeroes(fip.Signature),
 };
 
 pub const CSymbolCollection = struct {
@@ -100,7 +99,7 @@ pub fn main(init: std.process.Init) !u8 {
 
     defer toml.free_configs(init.gpa);
     if (!try toml.parse(init.gpa)) {
-        fip.fip_print(ID, fip.FIP_ERROR, "Failed to parse '.fip/config/fip-c.toml' file, aborting...");
+        fip.print(ID, .@"error", "Failed to parse '.fip/config/fip-c.toml' file, aborting...");
         return 1;
     }
 
@@ -111,19 +110,19 @@ pub fn main(init: std.process.Init) !u8 {
             return err;
         };
     } else {
-        fip.fip_print(ID, fip.FIP_ERROR, "Unable to parse file '%s'", file.ptr);
+        fip.print(ID, .@"error", "Unable to parse file '%s'", file.ptr);
         return 1;
     }
 
     for (configs) |*config| {
-        fip.fip_print(ID, fip.FIP_DEBUG, "[%s]", &config.tag);
+        fip.print(ID, .debug, "[%s]", &config.tag);
         for (config.headers, 0..) |header, i| {
-            fip.fip_print(ID, fip.FIP_DEBUG, "  header[%lu]  = \"%s\"", i, header.ptr);
+            fip.print(ID, .debug, "  header[%lu]  = \"%s\"", i, header.ptr);
         }
         for (config.command, 0..) |command, i| {
-            fip.fip_print(ID, fip.FIP_DEBUG, "  command[%lu] = \"%s\"", i, command.ptr);
+            fip.print(ID, .debug, "  command[%lu] = \"%s\"", i, command.ptr);
         }
-        fip.fip_print(ID, fip.FIP_DEBUG, "  output     = \"%s\"", &config.output);
+        fip.print(ID, .debug, "  output     = \"%s\"", &config.output);
     }
     return 0;
 }

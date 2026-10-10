@@ -14,13 +14,6 @@ pub fn build(b: *std.Build) void {
         .optimize = optimize,
         .@"lib-mode" = .slave,
     });
-    const fip_c = b.addTranslateC(.{
-        .target = target,
-        .optimize = optimize,
-        .root_source_file = fip_dep.path("fip.h"),
-    });
-    fip_c.defineCMacro("FIP_SLAVE", null);
-    fip_c.addIncludePath(fip_dep.builder.dependency("tomlc17", .{}).path("src"));
 
     const exe = b.addExecutable(.{
         .name = "fip-c",
@@ -33,10 +26,8 @@ pub fn build(b: *std.Build) void {
         .use_lld = true,
     });
     b.installArtifact(exe);
-    exe.step.dependOn(&fip_c.step);
-    exe.root_module.addImport("fip", fip_c.createModule());
-    exe.root_module.linkLibrary(fip_dep.artifact("fip"));
-    exe.installLibraryHeaders(fip_dep.artifact("fip"));
+    exe.root_module.addImport("fip", fip_dep.module("fip"));
+    exe.root_module.addImport("toml", fip_dep.module("toml"));
 
     // Override so that fip headers are installed
     b.getInstallStep().dependOn(&b.addInstallArtifact(exe, .{

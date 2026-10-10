@@ -46,17 +46,15 @@ pub fn parse_file(
             .function => |function| {
                 const fn_type: aro.Type.Func = function.qt.base(compilation).type.func;
                 std.debug.print("Found function: {s}\n", .{tree.tokSlice(function.name_tok)});
-                symbol.type = fip.FIP_SYM_FUNCTION;
-                const sym_fn: *fip.fip_sig_fn_t = &symbol.sig.@"fn";
+                symbol.sig.tag = .@"fn";
+                const sym_fn: *fip.Signature.Fn = &symbol.sig.u.@"fn";
                 sym_fn.args_len = @intCast(fn_type.params.len);
-                const args: []fip.fip_sig_fn_arg_t =
+                sym_fn.args =
                     if (fn_type.params.len > 0)
-                        (try fip_alloc.alloc(fip.fip_sig_fn_arg_t, fn_type.params.len))
+                        (try fip_alloc.alloc(fip.Signature.Fn.Arg, fn_type.params.len)).ptr
                     else
-                        &.{};
-                @memset(std.mem.sliceAsBytes(args), 0);
-                if (args.len > 0) sym_fn.args = args.ptr;
-                for (fn_type.params, args) |*param, *arg| {
+                        undefined;
+                for (fn_type.params, sym_fn.args[0..sym_fn.args_len]) |*param, *arg| {
                     const param_name: []const u8 = param.name.lookup(compilation);
                     @memcpy(arg.name[0..@min(param_name.len, 127)], param_name);
                     if (!try get_type(compilation, &param.qt, &arg.type, &.{})) {
@@ -73,19 +71,19 @@ pub fn parse_file(
             },
             .enum_decl => |enum_decl| {
                 std.debug.print("Found enum: {s}\n", .{tree.tokSlice(enum_decl.name_or_kind_tok)});
-                symbol.type = fip.FIP_SYM_ENUM;
+                symbol.sig.tag = .@"enum";
             },
             .enum_forward_decl => |enum_forward_decl| {
                 std.debug.print("Found enum forward: {s}\n", .{tree.tokSlice(enum_forward_decl.name_or_kind_tok)});
-                symbol.type = fip.FIP_SYM_ENUM;
+                symbol.sig.tag = .@"enum";
             },
             .struct_decl => |struct_decl| {
                 std.debug.print("Found struct: {s}\n", .{tree.tokSlice(struct_decl.name_or_kind_tok)});
-                symbol.type = fip.FIP_SYM_DATA;
+                symbol.sig.tag = .data;
             },
             .struct_forward_decl => |struct_forward_decl| {
                 std.debug.print("Found struct forward: {s}\n", .{tree.tokSlice(struct_forward_decl.name_or_kind_tok)});
-                symbol.type = fip.FIP_SYM_DATA;
+                symbol.sig.tag = .data;
             },
             .union_decl => |union_decl| {
                 std.debug.print("Found union: {s}\n", .{tree.tokSlice(union_decl.name_or_kind_tok)});
@@ -113,64 +111,44 @@ pub fn parse_file(
 }
 
 fn free_symbol(symbol: *main.CSymbol) void {
-    switch (symbol.type) {
-        fip.FIP_SYM_FUNCTION => {
-            const fn_sig = &symbol.sig.@"fn";
-            if (fn_sig.args_len > 0 and fn_sig.args != null) {
+    switch (symbol.sig.tag) {
+        .@"fn" => {
+            const fn_sig = &symbol.sig.u.@"fn";
+            if (fn_sig.args_len > 0) {
                 for (fn_sig.args[0..fn_sig.args_len]) |*arg| {
-                    fip.fip_free_type(&arg.type);
+                    arg.type.free();
                 }
                 fip_alloc.free(fn_sig.args[0..fn_sig.args_len]);
             }
-            fn_sig.args = null;
+            fn_sig.args = undefined;
             fn_sig.args_len = 0;
-            if (fn_sig.rets_len > 0 and fn_sig.rets != null) {
+            if (fn_sig.rets_len > 0) {
                 for (fn_sig.rets[0..fn_sig.rets_len]) |*ret| {
-                    fip.fip_free_type(ret);
+                    ret.free();
                 }
                 fip_alloc.free(fn_sig.rets[0..fn_sig.rets_len]);
             }
-            fn_sig.rets = null;
+            fn_sig.rets = undefined;
             fn_sig.rets_len = 0;
         },
-        fip.FIP_SYM_DATA => {
-            const data_sig = &symbol.sig.data;
-            if (data_sig.value_count > 0) {
-                if (data_sig.value_names != null) {
-                    for (data_sig.value_names[0..data_sig.value_count]) |name| {
-                        if (name != null) {
-                            const str: [*:0]const u8 = @ptrCast(name);
-                            fip_alloc.free(str[0 .. std.mem.len(str) + 1]);
-                        }
-                    }
-                    fip_alloc.free(data_sig.value_names[0..data_sig.value_count]);
+        .data => {
+            const data_sig = &symbol.sig.u.data;
+            if (data_sig.field_count > 0) {
+                for (data_sig.fields[0..data_sig.field_count]) |*field| {
+                    field.type.free();
                 }
-                if (data_sig.value_types != null) {
-                    for (data_sig.value_types[0..data_sig.value_count]) |*t| {
-                        fip.fip_free_type(t);
-                    }
-                    fip_alloc.free(data_sig.value_types[0..data_sig.value_count]);
-                }
-                data_sig.value_count = 0;
+                fip_alloc.free(data_sig.fields[0..data_sig.field_count]);
             }
+            data_sig.fields = undefined;
+            data_sig.field_count = 0;
         },
-        fip.FIP_SYM_ENUM => {
-            const enum_sig = &symbol.sig.enumt;
+        .@"enum" => {
+            const enum_sig = &symbol.sig.u.@"enum";
             if (enum_sig.value_count > 0) {
-                if (enum_sig.tags != null) {
-                    for (enum_sig.tags[0..enum_sig.value_count]) |tag| {
-                        if (tag != null) {
-                            const str: [*:0]const u8 = @ptrCast(tag);
-                            fip_alloc.free(str[0 .. std.mem.len(str) + 1]);
-                        }
-                    }
-                    fip_alloc.free(enum_sig.tags[0..enum_sig.value_count]);
-                }
-                if (enum_sig.values != null) {
-                    fip_alloc.free(enum_sig.values[0..enum_sig.value_count]);
-                }
-                enum_sig.value_count = 0;
+                fip_alloc.free(enum_sig.values[0..enum_sig.value_count]);
             }
+            enum_sig.values = undefined;
+            enum_sig.value_count = 0;
         },
         else => {},
     }
@@ -190,12 +168,12 @@ fn free_symbol_list(allocator: std.mem.Allocator, symbols: *std.ArrayList(main.C
     symbols.deinit(allocator);
 }
 
-fn free_type_array(fields: []fip.fip_type_t) void {
-    for (fields) |*field| {
-        fip.fip_free_type(field);
+fn free_type_array(types: []fip.Type) void {
+    for (types) |*field| {
+        field.free();
     }
-    if (fields.len > 0) {
-        fip_alloc.free(fields);
+    if (types.len > 0) {
+        fip_alloc.free(types);
     }
 }
 
@@ -216,7 +194,7 @@ fn findInStack(stack: []const []const u8, name: []const u8) ?usize {
 fn get_type(
     compilation: *const aro.Compilation,
     qt_in: *const aro.QualType,
-    out: *fip.fip_type_t,
+    out: *fip.Type,
     type_stack: []const []const u8,
 ) !bool {
     const base = qt_in.base(compilation);
@@ -224,26 +202,26 @@ fn get_type(
     out.* = switch (in) {
         .void => .{
             .is_mutable = !qt_in.@"const",
-            .type = fip.FIP_TYPE_PRIMITIVE,
-            .u = .{ .prim = fip.FIP_VOID },
+            .tag = .primitive,
+            .u = .{ .primitive = .void },
         },
         .bool => .{
             .is_mutable = !qt_in.@"const",
-            .type = fip.FIP_TYPE_PRIMITIVE,
-            .u = .{ .prim = fip.FIP_BOOL },
+            .tag = .primitive,
+            .u = .{ .primitive = .bool },
         },
         .nullptr_t => blk: {
-            const base_type: *fip.fip_type_t = try fip_alloc.create(fip.fip_type_t);
+            const base_type: *fip.Type = try fip_alloc.create(fip.Type);
             base_type.* = .{
                 .is_mutable = false,
-                .type = fip.FIP_TYPE_PRIMITIVE,
-                .u = .{ .prim = fip.FIP_VOID },
+                .tag = .primitive,
+                .u = .{ .primitive = .void },
             };
             break :blk .{
                 .is_mutable = !qt_in.@"const",
-                .type = fip.FIP_TYPE_PTR,
+                .tag = .pointer,
                 .u = .{
-                    .ptr = .{
+                    .pointer = .{
                         .base_type = base_type,
                     },
                 },
@@ -252,24 +230,24 @@ fn get_type(
 
         .int => |int| .{
             .is_mutable = !qt_in.@"const",
-            .type = fip.FIP_TYPE_PRIMITIVE,
+            .tag = .primitive,
             .u = .{
-                .prim = switch (int) {
-                    .char => fip.FIP_I8,
-                    .schar => fip.FIP_I8,
-                    .uchar => fip.FIP_U8,
-                    .short => fip.FIP_I16,
-                    .ushort => fip.FIP_U16,
-                    .int => fip.FIP_I32,
-                    .uint => fip.FIP_U32,
-                    .long, .long_long => fip.FIP_I64,
-                    .ulong, .ulong_long => fip.FIP_U64,
+                .primitive = switch (int) {
+                    .char => .i8,
+                    .schar => .i8,
+                    .uchar => .u8,
+                    .short => .i16,
+                    .ushort => .u16,
+                    .int => .i32,
+                    .uint => .u32,
+                    .long, .long_long => .i64,
+                    .ulong, .ulong_long => .u64,
                     .int128 => {
-                        fip.fip_print(main.ID, fip.FIP_ERROR, "FIP cannot hanlde int128 types");
+                        fip.print(main.ID, .@"error", "FIP cannot hanlde int128 types");
                         return false;
                     },
                     .uint128 => {
-                        fip.fip_print(main.ID, fip.FIP_ERROR, "FIP cannot hanlde uint128 types");
+                        fip.print(main.ID, .@"error", "FIP cannot hanlde uint128 types");
                         return false;
                     },
                 },
@@ -277,73 +255,73 @@ fn get_type(
         },
         .float => |float| .{
             .is_mutable = !qt_in.@"const",
-            .type = fip.FIP_TYPE_PRIMITIVE,
+            .tag = .primitive,
             .u = .{
-                .prim = switch (float) {
+                .primitive = switch (float) {
                     .bf16 => {
-                        fip.fip_print(main.ID, fip.FIP_ERROR, "FIP cannot handle 'bf16' types");
+                        fip.print(main.ID, .@"error", "FIP cannot handle 'bf16' types");
                         return false;
                     },
                     .fp16, .float16 => {
-                        fip.fip_print(main.ID, fip.FIP_ERROR, "FIP cannot handle 'f16' types");
+                        fip.print(main.ID, .@"error", "FIP cannot handle 'f16' types");
                         return false;
                     },
-                    .float, .float32 => fip.FIP_F32,
-                    .double, .float64 => fip.FIP_F64,
+                    .float, .float32 => .f32,
+                    .double, .float64 => .f32,
                     .long_double => {
-                        fip.fip_print(main.ID, fip.FIP_ERROR, "FIP cannot handle 'long double' types");
+                        fip.print(main.ID, .@"error", "FIP cannot handle 'long double' types");
                         return false;
                     },
                     .float128 => {
-                        fip.fip_print(main.ID, fip.FIP_ERROR, "FIP cannot handle 'f128' types");
+                        fip.print(main.ID, .@"error", "FIP cannot handle 'f128' types");
                         return false;
                     },
                     .float32x => {
-                        fip.fip_print(main.ID, fip.FIP_ERROR, "FIP cannot handle 'float32x' types");
+                        fip.print(main.ID, .@"error", "FIP cannot handle 'float32x' types");
                         return false;
                     },
                     .float64x => {
-                        fip.fip_print(main.ID, fip.FIP_ERROR, "FIP cannot handle 'float64x' types");
+                        fip.print(main.ID, .@"error", "FIP cannot handle 'float64x' types");
                         return false;
                     },
                     .float128x => {
-                        fip.fip_print(main.ID, fip.FIP_ERROR, "FIP cannot handle 'float128x' types");
+                        fip.print(main.ID, .@"error", "FIP cannot handle 'float128x' types");
                         return false;
                     },
                     .dfloat32 => {
-                        fip.fip_print(main.ID, fip.FIP_ERROR, "FIP cannot handle 'dfloat32' types");
+                        fip.print(main.ID, .@"error", "FIP cannot handle 'dfloat32' types");
                         return false;
                     },
                     .dfloat64 => {
-                        fip.fip_print(main.ID, fip.FIP_ERROR, "FIP cannot handle 'dfloat64' types");
+                        fip.print(main.ID, .@"error", "FIP cannot handle 'dfloat64' types");
                         return false;
                     },
                     .dfloat128 => {
-                        fip.fip_print(main.ID, fip.FIP_ERROR, "FIP cannot handle 'dfloat128' types");
+                        fip.print(main.ID, .@"error", "FIP cannot handle 'dfloat128' types");
                         return false;
                     },
                     .dfloat64x => {
-                        fip.fip_print(main.ID, fip.FIP_ERROR, "FIP cannot handle 'dfloat64x' types");
+                        fip.print(main.ID, .@"error", "FIP cannot handle 'dfloat64x' types");
                         return false;
                     },
                 },
             },
         },
         .complex => {
-            fip.fip_print(main.ID, fip.FIP_ERROR, "FIP cannot handle complex types");
+            fip.print(main.ID, .@"error", "FIP cannot handle complex types");
             return false;
         },
         .bit_int => {
-            fip.fip_print(main.ID, fip.FIP_ERROR, "FIP cannot handle bit int types");
+            fip.print(main.ID, .@"error", "FIP cannot handle bit int types");
             return false;
         },
         .atomic => {
-            fip.fip_print(main.ID, fip.FIP_ERROR, "FIP cannot handle atomic types");
+            fip.print(main.ID, .@"error", "FIP cannot handle atomic types");
             return false;
         },
 
         .func => {
-            fip.fip_print(main.ID, fip.FIP_ERROR, "FIP cannot handle function types");
+            fip.print(main.ID, .@"error", "FIP cannot handle function types");
             return false;
         },
         .pointer => |ptr| blk: {
@@ -354,7 +332,7 @@ fn get_type(
                     const levels_back = 1;
                     break :blk .{
                         .is_mutable = !qt_in.@"const",
-                        .type = fip.FIP_TYPE_RECURSIVE,
+                        .tag = .recursive,
                         .u = .{ .recursive = .{ .levels_back = @intCast(levels_back) } },
                     };
                 },
@@ -362,7 +340,7 @@ fn get_type(
                     const levels_back = 1;
                     break :blk .{
                         .is_mutable = !qt_in.@"const",
-                        .type = fip.FIP_TYPE_RECURSIVE,
+                        .tag = .recursive,
                         .u = .{ .recursive = .{ .levels_back = @intCast(levels_back) } },
                     };
                 },
@@ -370,7 +348,7 @@ fn get_type(
             }
 
             // Normal pointer: expand child
-            const inner: *fip.fip_type_t = try fip_alloc.create(fip.fip_type_t);
+            const inner: *fip.Type = try fip_alloc.create(fip.Type);
             errdefer fip_alloc.destroy(inner);
             if (!try get_type(compilation, &ptr.child, inner, type_stack)) {
                 fip_alloc.destroy(inner);
@@ -378,28 +356,28 @@ fn get_type(
             }
             break :blk .{
                 .is_mutable = !qt_in.@"const",
-                .type = fip.FIP_TYPE_PTR,
-                .u = .{ .ptr = .{ .base_type = inner } },
+                .tag = .pointer,
+                .u = .{ .pointer = .{ .base_type = inner } },
             };
         },
         .array => |arr| blk: {
             const len: usize = switch (arr.len) {
                 .incomplete => {
-                    fip.fip_print(main.ID, fip.FIP_ERROR, "FIP cannot handle dynamic array types");
+                    fip.print(main.ID, .@"error", "FIP cannot handle dynamic array types");
                     return false;
                 },
                 .fixed => |size| size,
                 .static => |size| size,
                 .variable => {
-                    fip.fip_print(main.ID, fip.FIP_ERROR, "FIP cannot handle variable length array types");
+                    fip.print(main.ID, .@"error", "FIP cannot handle variable length array types");
                     return false;
                 },
                 .unspecified_variable => {
-                    fip.fip_print(main.ID, fip.FIP_ERROR, "FIP cannot handle unspecified variable length array types");
+                    fip.print(main.ID, .@"error", "FIP cannot handle unspecified variable length array types");
                     return false;
                 },
             };
-            const inner: *fip.fip_type_t = try fip_alloc.create(fip.fip_type_t);
+            const inner: *fip.Type = try fip_alloc.create(fip.Type);
             errdefer fip_alloc.destroy(inner);
             if (!try get_type(compilation, &arr.elem, inner, type_stack)) {
                 fip_alloc.destroy(inner);
@@ -407,7 +385,7 @@ fn get_type(
             }
             break :blk .{
                 .is_mutable = !qt_in.@"const",
-                .type = fip.FIP_TYPE_ARRAY,
+                .tag = .array,
                 .u = .{
                     .array = .{
                         .size = len,
@@ -417,12 +395,12 @@ fn get_type(
             };
         },
         .vector => {
-            fip.fip_print(main.ID, fip.FIP_ERROR, "FIP cannot handle vector types");
+            fip.print(main.ID, .@"error", "FIP cannot handle vector types");
             return false;
         },
 
         .@"struct" => |rec| blk: {
-            var out_struct = fip.fip_type_struct_t{};
+            var out_struct = fip.Type.Struct{};
 
             // Copy struct name
             const sname = rec.name.lookup(compilation);
@@ -435,7 +413,7 @@ fn get_type(
             if (findInStack(type_stack, sname) != null) {
                 break :blk .{
                     .is_mutable = !qt_in.@"const",
-                    .type = fip.FIP_TYPE_RECURSIVE,
+                    .tag = .recursive,
                     .u = .{ .recursive = .{ .levels_back = 1 } },
                 };
             }
@@ -455,9 +433,9 @@ fn get_type(
             };
 
             out_struct.field_count = @intCast(rec.fields.len);
-            const fields: []fip.fip_type_t =
+            const fields: []fip.Type =
                 if (rec.fields.len > 0)
-                    (try fip_alloc.alloc(fip.fip_type_t, rec.fields.len))
+                    (try fip_alloc.alloc(fip.Type, rec.fields.len))
                 else
                     &.{};
             // Zero so that partially-built field entries are FIP_TYPE_PRIMITIVE
@@ -478,21 +456,19 @@ fn get_type(
 
             break :blk .{
                 .is_mutable = !qt_in.@"const",
-                .type = fip.FIP_TYPE_STRUCT,
-                .u = .{ .struct_t = out_struct },
+                .tag = .@"struct",
+                .u = .{ .@"struct" = out_struct },
             };
         },
         .@"union" => {
-            fip.fip_print(main.ID, fip.FIP_ERROR, "FIP cannot handle union types");
+            fip.print(main.ID, .@"error", "FIP cannot handle union types");
             return false;
         },
         .@"enum" => |enum_type| blk: {
-            var out_enum: fip.fip_type_enum_t = .{
-                .name = @splat(0),
+            var out_enum: fip.Type.Enum = .{
                 .bit_width = 32,
-                .is_signed = 1,
+                .is_signed = true,
                 .value_count = @intCast(enum_type.fields.len),
-                .values = null,
             };
             const values: []usize =
                 if (enum_type.fields.len > 0)
@@ -514,8 +490,8 @@ fn get_type(
 
             break :blk .{
                 .is_mutable = !qt_in.@"const",
-                .type = fip.FIP_TYPE_ENUM,
-                .u = .{ .enum_t = out_enum },
+                .tag = .@"enum",
+                .u = .{ .@"enum" = out_enum },
             };
         },
 

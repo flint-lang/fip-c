@@ -3,8 +3,8 @@ const fip = @import("fip");
 
 const main = @import("main.zig");
 
-pub fn handle_function_symbol_request(message: *const fip.fip_msg_t, sym_res: *fip.fip_msg_symbol_response_t) void {
-    std.debug.assert(message.u.sym_req.type == fip.FIP_SYM_FUNCTION);
+pub fn handle_function_symbol_request(message: *const fip.Message, sym_res: *fip.Message.SymbolResponse) void {
+    std.debug.assert(message.tag == .symbol_request);
     const msg_fn: *const fip.fip_sig_fn_t = &message.u.sym_req.sig.@"fn";
     fip.fip_print_sig_fn(main.ID, msg_fn);
     sym_res.type = fip.FIP_SYM_FUNCTION;
