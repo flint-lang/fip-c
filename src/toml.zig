@@ -270,3 +270,7 @@ pub fn free_configs(allocator: std.mem.Allocator) void {
     allocator.free(main.configs);
     main.configs = &.{};
 }
+
+test "refAllDecls" {
+    std.testing.refAllDecls(@This());
+}

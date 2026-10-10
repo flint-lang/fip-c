@@ -42,4 +42,22 @@ pub fn build(b: *std.Build) void {
         .install_dir = .prefix,
         .install_subdir = "include/arocc/include",
     });
+
+    const tests_step = b.step("test", "Run tests");
+    const mode_tests = b.addTest(.{
+        .root_module = b.createModule(.{
+            .root_source_file = b.path("src/main.zig"),
+            .target = b.graph.host,
+            .optimize = optimize,
+            .link_libc = true,
+            .imports = &.{
+                .{ .name = "aro", .module = aro_dep.module("aro") },
+                .{ .name = "fip", .module = fip_dep.module("fip") },
+                .{ .name = "toml", .module = fip_dep.module("toml") },
+            },
+        }),
+        .use_llvm = true,
+        .use_lld = true,
+    });
+    tests_step.dependOn(&b.addRunArtifact(mode_tests).step);
 }

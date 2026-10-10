@@ -499,3 +499,7 @@ fn get_type(
     };
     return true;
 }
+
+test "refAllDecls" {
+    std.testing.refAllDecls(@This());
+}

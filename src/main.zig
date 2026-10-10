@@ -126,3 +126,7 @@ pub fn main(init: std.process.Init) !u8 {
     }
     return 0;
 }
+
+test "refAllDecls" {
+    std.testing.refAllDecls(@This());
+}

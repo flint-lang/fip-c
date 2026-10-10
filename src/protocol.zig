@@ -410,3 +410,7 @@ pub fn handle_tag_request(buffer: [fip.FIP_MSG_SIZE]u8, message: *const fip.fip_
     };
     fip.fip_slave_send_message(main.ID, buffer, &response);
 }
+
+test "refAllDecls" {
+    std.testing.refAllDecls(@This());
+}
