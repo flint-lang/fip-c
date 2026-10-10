@@ -1,6 +1,8 @@
 const std = @import("std");
+const defines = @import("defines");
 const aro = @import("aro");
 const fip = @import("fip");
+const clap = @import("clap");
 
 const protocol = @import("protocol.zig");
 const parser = @import("parser.zig");
@@ -49,9 +51,59 @@ pub var ID: u32 = 0;
 pub var configs: []ModuleConfig = &.{};
 
 pub var symbol_collections: std.ArrayList(CSymbolCollection) = .empty;
-// fip_c_symbol_collection_t *curr_coll;
+
+const parsers = .{
+    .slave_id = clap.parsers.int(u32, 10),
+};
+const params = clap.parseParamsComptime(
+    \\-h, --help    Display this help and exit
+    \\-v, --version Display the FIP version this Flint Interop Module uses
+    \\<slave_id>    [required] The ID of this slave
+);
 
 pub fn main(init: std.process.Init) !u8 {
+    var stdout_writer = std.Io.File.stdout().writer(init.io, &.{});
+    const stdout = &stdout_writer.interface;
+    var stderr_writer = std.Io.File.stderr().writer(init.io, &.{});
+    const stderr = &stderr_writer.interface;
+
+    var iter = try init.minimal.args.iterateAllocator(init.gpa);
+    defer iter.deinit();
+
+    _ = iter.next();
+
+    var diag = clap.Diagnostic{};
+    var res = clap.parseEx(clap.Help, &params, parsers, &iter, .{
+        .diagnostic = &diag,
+        .allocator = init.gpa,
+        .terminating_positional = 0,
+    }) catch {
+        std.log.err("Invalid <slave_id>: {s}", .{init.minimal.args.vector[1]});
+        try printHelp(stderr);
+        return 1;
+    };
+    defer res.deinit();
+
+    if (res.args.help != 0) {
+        try printHelp(stdout);
+        return 0;
+    }
+    if (res.args.version != 0) {
+        try stdout.print("fip-c v{s} ({s}, {s})", .{ defines.version, defines.hash, defines.date });
+        if (@import("builtin").mode == .Debug) {
+            try stdout.print(" [debug]", .{});
+        }
+        try stdout.print("\n └─ Flint Interop Protocol v{d}.{d}.{d}\n", .{ fip.MAJOR, fip.MINOR, fip.PATCH });
+        try stdout.flush();
+        return 0;
+    }
+
+    ID = res.positionals[0] orelse {
+        std.log.err("Missing required argument <slave_id>", .{});
+        try printHelp(stderr);
+        return 1;
+    };
+
     defer symbol_collections.deinit(init.gpa);
     defer {
         for (symbol_collections.items) |*collection| {
@@ -125,6 +177,20 @@ pub fn main(init: std.process.Init) !u8 {
         fip.print(ID, .debug, "  output     = \"%s\"", &config.output);
     }
     return 0;
+}
+
+fn printHelp(writer: *std.Io.Writer) !void {
+    try writer.writeAll(
+        \\Usage: fip-c <slave_id>
+        \\
+    );
+    try clap.help(writer, clap.Help, &params, .{
+        .indent = 2,
+        .spacing_between_parameters = 0,
+        .description_indent = 4,
+        .description_on_new_line = false,
+        .max_width = 100,
+    });
 }
 
 test "refAllDecls" {
