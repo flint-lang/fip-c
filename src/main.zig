@@ -58,7 +58,7 @@ const parsers = .{
 };
 const params = clap.parseParamsComptime(
     \\-h, --help    Display this help and exit
-    \\-v, --version Display the FIP version this Flint Interop Module uses
+    \\-v, --version Display the version information and exit
     \\<slave_id>    [required] The ID of this slave
 );
 
@@ -224,6 +224,7 @@ fn printHelp(writer: *std.Io.Writer) !void {
         .description_on_new_line = false,
         .max_width = 100,
     });
+    try writer.flush();
 }
 
 test "refAllDecls" {
