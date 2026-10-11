@@ -45,9 +45,13 @@ pub fn parse_file(
         switch (decl_node) {
             .function => |function| {
                 const fn_type: aro.Type.Func = function.qt.base(compilation).type.func;
-                std.debug.print("Found function: {s}\n", .{tree.tokSlice(function.name_tok)});
                 symbol.sig.tag = .@"fn";
                 const sym_fn: *fip.Signature.Fn = &symbol.sig.u.@"fn";
+                const fn_name: []const u8 = tree.tokSlice(function.name_tok);
+                const fn_name_len = @min(fn_name.len, fip.NAME_SIZE);
+                sym_fn.name = @splat(0);
+                @memcpy(sym_fn.name[0..fn_name_len], fn_name[0..fn_name_len]);
+
                 sym_fn.args_len = @intCast(fn_type.params.len);
                 sym_fn.args =
                     if (fn_type.params.len > 0)
@@ -56,34 +60,109 @@ pub fn parse_file(
                         undefined;
                 for (fn_type.params, sym_fn.args[0..sym_fn.args_len]) |*param, *arg| {
                     const param_name: []const u8 = param.name.lookup(compilation);
-                    @memcpy(arg.name[0..@min(param_name.len, 127)], param_name);
-                    if (!try get_type(compilation, &param.qt, &arg.type, &.{})) {
+                    arg.name = @splat(0);
+                    @memcpy(arg.name[0..@min(param_name.len, fip.NAME_SIZE)], param_name);
+                    if (!try get_type(compilation, symbols, &param.qt, &arg.type)) {
                         free_symbol_list(allocator, &symbols);
                         return null;
                     }
                 }
+
+                var ret_type: fip.Type = .{ .tag = .primitive, .u = .{ .primitive = .void } };
+                if (!try get_type(compilation, symbols, &fn_type.return_type, &ret_type)) {
+                    free_symbol_list(allocator, &symbols);
+                    return null;
+                }
+                sym_fn.rets_len = 0;
+                sym_fn.rets = undefined;
+                if (ret_type.tag != .primitive and ret_type.u.primitive != .void) {
+                    sym_fn.rets_len = 1;
+                    sym_fn.rets = (try fip_alloc.alloc(fip.Type, 1)).ptr;
+                    sym_fn.rets[0] = ret_type;
+                }
             },
             .typedef => |typedef| {
-                std.debug.print("Found typedef: {s}\n", .{tree.tokSlice(typedef.name_tok)});
+                std.debug.assert(symbols.items.len > 1);
+                var last_symbol: *main.CSymbol = &symbols.items[symbols.items.len - 2];
+
+                // If the last thing we parsed was an anonymous definition, we assume that this type def defines it
+                var out: fip.Type = .{
+                    .tag = .primitive,
+                    .u = .{ .primitive = .void },
+                };
+                if (!try get_type(compilation, symbols, &typedef.qt, &out)) {
+                    return null;
+                }
+                if (last_symbol.get_name()) |last_symbol_name| {
+                    std.debug.assert(std.mem.eql(u8, last_symbol_name, tree.tokSlice(typedef.name_tok)));
+                } else {
+                    last_symbol.set_name(tree.tokSlice(typedef.name_tok));
+                }
+                // Remove the last symbol, we do not collect the typedef directly
+                _ = symbols.pop();
             },
             .variable => |variable| {
                 std.debug.print("Found variable: {s}\n", .{tree.tokSlice(variable.name_tok)});
+                @panic("TODO");
             },
             .enum_decl => |enum_decl| {
-                std.debug.print("Found enum: {s}\n", .{tree.tokSlice(enum_decl.name_or_kind_tok)});
+                const enum_t: aro.Type.Enum = enum_decl.container_qt.base(compilation).type.@"enum";
+                std.debug.assert(enum_decl.fields.len == enum_t.fields.len);
                 symbol.sig.tag = .@"enum";
+                // Don't set the name if the token is anything other than an identifier
+                const id = tree.tokens.items(.id)[enum_decl.name_or_kind_tok];
+                if (id == .identifier) {
+                    symbol.set_name(tree.tokSlice(enum_decl.name_or_kind_tok));
+                }
+                const @"enum" = &symbol.sig.u.@"enum";
+                @"enum".value_count = enum_t.fields.len;
+                @"enum".values = (try fip_alloc.alloc(fip.Signature.Enum.Value, @"enum".value_count)).ptr;
+                for (enum_t.fields, enum_decl.fields, @"enum".values[0..@"enum".value_count]) |*field, decl_field, *value| {
+                    const value_tag: []const u8 = field.name.lookup(compilation);
+                    const value_tag_len: usize = @min(value_tag.len, fip.NAME_SIZE);
+                    value.tag = @splat(0);
+                    @memcpy(value.tag[0..value_tag_len], value_tag[0..value_tag_len]);
+                    value.value =
+                        if (tree.value_map.get(decl_field)) |val|
+                            if (val.toInt(usize, compilation)) |uval| .{
+                                .is_signed = false,
+                                .value = uval,
+                            } else if (val.toInt(i64, compilation)) |ival| .{
+                                .is_signed = ival < 0,
+                                .value = @abs(ival),
+                            } else .{ .is_signed = false, .value = 0 }
+                        else
+                            .{ .is_signed = false, .value = 0 };
+                }
             },
             .enum_forward_decl => |enum_forward_decl| {
                 std.debug.print("Found enum forward: {s}\n", .{tree.tokSlice(enum_forward_decl.name_or_kind_tok)});
-                symbol.sig.tag = .@"enum";
+                @panic("TODO");
             },
             .struct_decl => |struct_decl| {
-                std.debug.print("Found struct: {s}\n", .{tree.tokSlice(struct_decl.name_or_kind_tok)});
+                const record: aro.Type.Record = struct_decl.container_qt.base(compilation).type.@"struct";
                 symbol.sig.tag = .data;
+                // Don't set the name if the token is anything other than an identifier
+                const id = tree.tokens.items(.id)[struct_decl.name_or_kind_tok];
+                if (id == .identifier) {
+                    symbol.set_name(tree.tokSlice(struct_decl.name_or_kind_tok));
+                }
+                const data = &symbol.sig.u.data;
+                data.field_count = record.fields.len;
+                data.fields = (try fip_alloc.alloc(fip.Signature.Data.Field, data.field_count)).ptr;
+                for (record.fields, data.fields[0..data.field_count]) |*rfield, *dfield| {
+                    if (!try get_type(compilation, symbols, &rfield.qt, &dfield.type)) {
+                        return null;
+                    }
+                    const field_name: []const u8 = rfield.name.lookup(compilation);
+                    const field_name_len: usize = @min(field_name.len, fip.NAME_SIZE);
+                    dfield.name = @splat(0);
+                    @memcpy(dfield.name[0..field_name_len], field_name[0..field_name_len]);
+                }
             },
             .struct_forward_decl => |struct_forward_decl| {
                 std.debug.print("Found struct forward: {s}\n", .{tree.tokSlice(struct_forward_decl.name_or_kind_tok)});
-                symbol.sig.tag = .data;
+                @panic("TODO");
             },
             .union_decl => |union_decl| {
                 std.debug.print("Found union: {s}\n", .{tree.tokSlice(union_decl.name_or_kind_tok)});
@@ -98,6 +177,10 @@ pub fn parse_file(
                 return error.InvalidDecltype;
             },
         }
+    }
+
+    for (symbols.items) |*symbol| {
+        symbol.sig.print(main.ID);
     }
 
     const collection: main.CSymbolCollection = .{
@@ -177,15 +260,15 @@ fn free_type_array(types: []fip.Type) void {
     }
 }
 
-fn findInStack(stack: []const []const u8, name: []const u8) ?usize {
-    if (name.len == 0) {
-        return null;
-    }
-    var i = stack.len;
-    while (i > 0) {
-        i -= 1;
-        if (std.mem.eql(u8, stack[i], name)) {
-            return i;
+fn get_named_type(symbols: std.ArrayList(main.CSymbol), name: []const u8) ?fip.Type.Named {
+    const cmp_size = @min(name.len, fip.NAME_SIZE);
+    var named_type: fip.Type.Named = .{};
+    @memcpy(named_type.name[0..cmp_size], name[0..cmp_size]);
+    for (symbols.items) |*symbol| {
+        if (symbol.get_name()) |symbol_name| {
+            if (std.mem.eql(u8, symbol_name, name)) {
+                return named_type;
+            }
         }
     }
     return null;
@@ -193,13 +276,11 @@ fn findInStack(stack: []const []const u8, name: []const u8) ?usize {
 
 fn get_type(
     compilation: *const aro.Compilation,
+    symbols: std.ArrayList(main.CSymbol),
     qt_in: *const aro.QualType,
     out: *fip.Type,
-    type_stack: []const []const u8,
 ) !bool {
-    const base = qt_in.base(compilation);
-    const in = base.type;
-    out.* = switch (in) {
+    out.* = switch (qt_in.type(compilation)) {
         .void => .{
             .is_mutable = !qt_in.@"const",
             .tag = .primitive,
@@ -325,32 +406,31 @@ fn get_type(
             return false;
         },
         .pointer => |ptr| blk: {
-            // Check for recursive reference through pointer
             const child_base = ptr.child.base(compilation);
+            const inner: *fip.Type = try fip_alloc.create(fip.Type);
+            errdefer fip_alloc.destroy(inner);
+            // Check for recursive types
+            var inner_initialized: bool = false;
             switch (child_base.type) {
-                .@"struct" => |r| if (findInStack(type_stack, r.name.lookup(compilation))) |_| {
-                    const levels_back = 1;
-                    break :blk .{
+                .@"struct" => |@"struct"| if (get_named_type(symbols, @"struct".name.lookup(compilation))) |named| {
+                    inner.* = .{
                         .is_mutable = !qt_in.@"const",
-                        .tag = .recursive,
-                        .u = .{ .recursive = .{ .levels_back = @intCast(levels_back) } },
+                        .tag = .named,
+                        .u = .{ .named = named },
                     };
+                    inner_initialized = true;
                 },
-                .@"union" => |u| if (findInStack(type_stack, u.name.lookup(compilation))) |_| {
-                    const levels_back = 1;
-                    break :blk .{
+                .@"union" => |@"union"| if (get_named_type(symbols, @"union".name.lookup(compilation))) |named| {
+                    inner.* = .{
                         .is_mutable = !qt_in.@"const",
-                        .tag = .recursive,
-                        .u = .{ .recursive = .{ .levels_back = @intCast(levels_back) } },
+                        .tag = .named,
+                        .u = .{ .named = named },
                     };
+                    inner_initialized = true;
                 },
                 else => {},
             }
-
-            // Normal pointer: expand child
-            const inner: *fip.Type = try fip_alloc.create(fip.Type);
-            errdefer fip_alloc.destroy(inner);
-            if (!try get_type(compilation, &ptr.child, inner, type_stack)) {
+            if (!inner_initialized and !try get_type(compilation, symbols, &ptr.child, inner)) {
                 fip_alloc.destroy(inner);
                 return false;
             }
@@ -379,7 +459,7 @@ fn get_type(
             };
             const inner: *fip.Type = try fip_alloc.create(fip.Type);
             errdefer fip_alloc.destroy(inner);
-            if (!try get_type(compilation, &arr.elem, inner, type_stack)) {
+            if (!try get_type(compilation, symbols, &arr.elem, inner)) {
                 fip_alloc.destroy(inner);
                 return false;
             }
@@ -410,27 +490,13 @@ fn get_type(
             }
 
             // Check for recursion before expanding fields
-            if (findInStack(type_stack, sname) != null) {
+            if (get_named_type(symbols, sname)) |named| {
                 break :blk .{
                     .is_mutable = !qt_in.@"const",
-                    .tag = .recursive,
-                    .u = .{ .recursive = .{ .levels_back = 1 } },
+                    .tag = .named,
+                    .u = .{ .named = named },
                 };
             }
-
-            // Build new stack if named
-            var new_stack_allocated: ?std.ArrayList([]const u8) = null;
-            const new_stack =
-                if (sname.len > 0) blk_ns: {
-                    var list = std.ArrayList([]const u8).empty;
-                    try list.appendSlice(fip_alloc, type_stack);
-                    try list.append(fip_alloc, sname);
-                    new_stack_allocated = list;
-                    break :blk_ns list.items;
-                } else type_stack;
-            defer if (new_stack_allocated) |*lst| {
-                lst.deinit(fip_alloc);
-            };
 
             out_struct.field_count = @intCast(rec.fields.len);
             const fields: []fip.Type =
@@ -448,7 +514,7 @@ fn get_type(
 
             // Fill each field's type (in declaration order)
             for (rec.fields, fields) |*field, *ftype| {
-                if (!try get_type(compilation, &field.qt, ftype, new_stack)) {
+                if (!try get_type(compilation, symbols, &field.qt, ftype)) {
                     free_type_array(fields[0..out_struct.field_count]);
                     return false;
                 }
@@ -470,9 +536,9 @@ fn get_type(
                 .is_signed = true,
                 .value_count = @intCast(enum_type.fields.len),
             };
-            const values: []usize =
+            const values: []fip.Type.Enum.Value =
                 if (enum_type.fields.len > 0)
-                    (try fip_alloc.alloc(usize, enum_type.fields.len))
+                    (try fip_alloc.alloc(fip.Type.Enum.Value, enum_type.fields.len))
                 else
                     &.{};
             if (values.len > 0) {
@@ -495,7 +561,16 @@ fn get_type(
             };
         },
 
-        .typeof, .typedef, .attributed => @panic("These types should have disappeared because of the  base type unwrap"),
+        .typeof => |typeof| return !try get_type(compilation, symbols, &typeof.base, out),
+        .typedef => |typedef| if (get_named_type(symbols, typedef.name.lookup(compilation))) |named|
+            .{
+                .is_mutable = !qt_in.@"const",
+                .tag = .named,
+                .u = .{ .named = named },
+            }
+        else
+            return try get_type(compilation, symbols, &typedef.base, out),
+        .attributed => |attributed| return try get_type(compilation, symbols, &attributed.base, out),
     };
     return true;
 }

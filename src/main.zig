@@ -27,6 +27,43 @@ pub const CSymbol = struct {
     source_file_path: [512]u8 = @splat(0),
     line_number: u32,
     sig: fip.Signature = std.mem.zeroes(fip.Signature),
+
+    pub fn get_name(self: *const CSymbol) ?[]const u8 {
+        return switch (self.sig.tag) {
+            .unknown => null,
+            .@"fn" => blk: {
+                const name: [:0]const u8 = &self.sig.u.@"fn".name;
+                const len = std.mem.findScalarPos(u8, name, 0, '\x00').?;
+                break :blk if (len == 0) null else name[0..len];
+            },
+            .data => blk: {
+                const name: [:0]const u8 = &self.sig.u.data.name;
+                const len = std.mem.findScalarPos(u8, name, 0, '\x00').?;
+                break :blk if (len == 0) null else name[0..len];
+            },
+            .@"enum" => blk: {
+                const name: [:0]const u8 = &self.sig.u.@"enum".name;
+                const len = std.mem.findScalarPos(u8, name, 0, '\x00').?;
+                break :blk if (len == 0) null else name[0..len];
+            },
+            .@"opaque" => blk: {
+                const name: [:0]const u8 = &self.sig.u.@"opaque".name;
+                const len = std.mem.findScalarPos(u8, name, 0, '\x00').?;
+                break :blk if (len == 0) null else name[0..len];
+            },
+        };
+    }
+
+    pub fn set_name(self: *CSymbol, name: []const u8) void {
+        const write_len = @min(name.len, fip.NAME_SIZE);
+        switch (self.sig.tag) {
+            .unknown => {},
+            .@"fn" => @memcpy(self.sig.u.@"fn".name[0..write_len], name[0..write_len]),
+            .data => @memcpy(self.sig.u.data.name[0..write_len], name[0..write_len]),
+            .@"enum" => @memcpy(self.sig.u.@"enum".name[0..write_len], name[0..write_len]),
+            .@"opaque" => @memcpy(self.sig.u.@"opaque".name[0..write_len], name[0..write_len]),
+        }
+    }
 };
 
 pub const CSymbolCollection = struct {
