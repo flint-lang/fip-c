@@ -181,10 +181,8 @@ pub fn main(init: std.process.Init) !u8 {
         }
     }
 
-    var writer = std.Io.File.stdout().writer(init.io, &.{});
-
     const out_terminal: std.Io.Terminal = .{
-        .writer = &writer.interface,
+        .writer = stderr,
         .mode = .escape_codes,
     };
     var diagnostics: aro.Diagnostics = .{

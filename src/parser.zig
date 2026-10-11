@@ -20,12 +20,14 @@ pub fn parse_file(
     _ = try preproc.preprocess(builtin_macros);
 
     const source = try compilation.addSourceFromPath(file_path);
-    const eof = try preproc.preprocess(source);
+    const eof = preproc.preprocess(source) catch return null;
     try preproc.addToken(eof);
 
     var tree: aro.Tree = try aro.Parser.parse(&preproc);
     defer tree.deinit();
-    try tree.dump(terminal);
+    if (main.LOG_LEVEL == .debug) {
+        try tree.dump(terminal);
+    }
 
     var symbols: std.ArrayList(main.CSymbol) = .empty;
     errdefer free_symbol_list(allocator, &symbols);
