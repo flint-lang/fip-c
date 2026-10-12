@@ -9,8 +9,8 @@
             .hash = "aro-0.0.0-JSD1Qi7QNgDnfcrdEJf82v3o6MhZySjYVrtdfEf3E4Se",
         },
         .fip = .{
-            .url = "git+https://github.com/flint-lang/fip.git#b1670d7fe68253beb6ac22d610bc02fb2711b3bd",
-            .hash = "fip-0.4.1-jXH3OXCzAgBjy0UrFT3IZXh3b7aTIQnfAyFq15adTCq1",
+            .url = "git+https://github.com/flint-lang/fip.git#82f94d7c936d5f5632a6bb3a5234b984424bb7fc",
+            .hash = "fip-0.4.1-jXH3OV_SAgDlVI8tPxe5qrYk0ee21CZkEjPdQOkW6XZA",
         },
         .clap = .{
             .url = "https://github.com/Hejsil/zig-clap/archive/refs/tags/0.12.0.tar.gz",

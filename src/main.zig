@@ -29,6 +29,11 @@ pub const CSymbol = struct {
     pub fn get_name(self: *const CSymbol) ?[]const u8 {
         return switch (self.sig.tag) {
             .unknown => null,
+            .alias => blk: {
+                const name: [:0]const u8 = &self.sig.u.alias.name;
+                const len = std.mem.findScalarPos(u8, name, 0, '\x00').?;
+                break :blk if (len == 0) null else name[0..len];
+            },
             .@"fn" => blk: {
                 const name: [:0]const u8 = &self.sig.u.@"fn".name;
                 const len = std.mem.findScalarPos(u8, name, 0, '\x00').?;
@@ -56,6 +61,7 @@ pub const CSymbol = struct {
         const write_len = @min(name.len, fip.NAME_SIZE);
         switch (self.sig.tag) {
             .unknown => {},
+            .alias => @memcpy(self.sig.u.alias.name[0..write_len], name[0..write_len]),
             .@"fn" => @memcpy(self.sig.u.@"fn".name[0..write_len], name[0..write_len]),
             .data => @memcpy(self.sig.u.data.name[0..write_len], name[0..write_len]),
             .@"enum" => @memcpy(self.sig.u.@"enum".name[0..write_len], name[0..write_len]),

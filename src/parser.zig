@@ -79,22 +79,21 @@ pub fn parse_file(
                 }
             },
             .typedef => |typedef| {
+                const name_slice = tree.tokSlice(typedef.name_tok);
+                fip.print(main.ID, .debug, "typedef.name = '%.*s'", @as(i32, @intCast(name_slice.len)), name_slice.ptr);
                 std.debug.assert(symbols.items.len > 1);
                 var last_symbol: *main.CSymbol = &symbols.items[symbols.items.len - 2];
 
                 // If the last thing we parsed was an anonymous definition, we assume that this type def defines it
-                var out: fip.Type = .{
-                    .tag = .primitive,
-                    .u = .{ .primitive = .void },
-                };
-                try get_type(compilation, symbols, &typedef.qt, &out);
-                if (last_symbol.get_name()) |last_symbol_name| {
-                    std.debug.assert(std.mem.eql(u8, last_symbol_name, tree.tokSlice(typedef.name_tok)));
-                } else {
+                if (last_symbol.get_name() == null) {
+                    // Change the name of the last parsed symbol and pop the typedef to make it "disappear"
                     last_symbol.set_name(tree.tokSlice(typedef.name_tok));
+                    _ = symbols.pop();
                 }
-                // Remove the last symbol, we do not collect the typedef directly
-                _ = symbols.pop();
+                // It is a type alias
+                symbol.sig.tag = .alias;
+                symbol.set_name(tree.tokSlice(typedef.name_tok));
+                try get_type(compilation, symbols, &typedef.qt, &symbol.sig.u.alias.type);
             },
             .variable => |variable| {
                 std.debug.print("Found variable: {s}\n", .{tree.tokSlice(variable.name_tok)});

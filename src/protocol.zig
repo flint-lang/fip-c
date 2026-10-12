@@ -42,6 +42,8 @@ pub fn run(io: std.Io, allocator: std.mem.Allocator, out_terminal: std.Io.Termin
         fip.print(main.ID, .info, "Parsed '.fip/config/%s.toml' file successfully", main.MODULE_NAME);
     }
 
+    msg.print(main.ID);
+
     // Send the connect message to the master now, as we are now able to connect to it
     if (!msg.u.connect_request.setup_ok) {
         fip.print(main.ID, .info, "Sending shutdown request to master...");
