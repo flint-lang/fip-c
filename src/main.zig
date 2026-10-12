@@ -71,22 +71,20 @@ pub const CSymbolCollection = struct {
     /// module is requested to be compiled. Or, if the tag is empty and a single
     /// (or more) symbol(s) of that module are used then the whole module is
     /// compiled and returned.
-    needed: bool,
+    needed: bool = false,
     /// @var `errored`
     /// @brief Whether parsing of this collection's headers failed (for example
     /// because a header file does not exist). An errored collection is never
     /// reported as present to the master.
-    errored: bool,
-    tag: [128]u8,
-    symbols: []CSymbol,
+    errored: bool = false,
+    tag: [128]u8 = @splat(0),
+    symbols: []CSymbol = &.{},
 };
 
 /// The ID of this interop module
 pub var ID: u32 = 0;
 
 pub var configs: []ModuleConfig = &.{};
-
-pub var symbol_collections: []CSymbolCollection = &.{};
 
 const parsers = .{
     .slave_id = clap.parsers.int(u32, 10),
@@ -172,13 +170,6 @@ pub fn main(init: std.process.Init) !u8 {
         return 1;
     };
 
-    defer {
-        for (symbol_collections) |*collection| {
-            parser.free_symbols(init.gpa, collection.symbols);
-        }
-        init.gpa.free(symbol_collections);
-    }
-
     const out_terminal: std.Io.Terminal = .{
         .writer = stderr,
         .mode = .escape_codes,
@@ -219,7 +210,7 @@ pub fn main(init: std.process.Init) !u8 {
         windows_crt.disable_crlf_translations();
     }
 
-    return protocol.run(init.io, init.gpa, out_terminal, &compilation) catch 1;
+    return protocol.run(init.io, init.gpa, out_terminal, &compilation);
 }
 
 fn printHelp(writer: *std.Io.Writer) !void {

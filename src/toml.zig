@@ -74,9 +74,8 @@ pub fn parse(allocator: std.mem.Allocator) !bool {
                     return false;
                 }
                 const slen: usize = @intCast(elem.u.str.len);
-                cfg.headers[j] = try allocator.alloc(u8, slen + 1);
+                cfg.headers[j] = try allocator.alloc(u8, slen);
                 @memcpy(cfg.headers[j][0..slen], elem.u.str.ptr[0..slen]);
-                cfg.headers[j][slen] = '\x00';
             }
         }
         // sources (optional, array of strings)

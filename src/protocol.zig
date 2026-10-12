@@ -6,6 +6,8 @@ const main = @import("main.zig");
 const parser = @import("parser.zig");
 const toml = @import("toml.zig");
 
+var symbol_collections: []main.CSymbolCollection = &.{};
+
 pub fn run(io: std.Io, allocator: std.mem.Allocator, out_terminal: std.Io.Terminal, compilation: *aro.Compilation) !u8 {
     fip.print(main.ID, .info, "starting...");
 
@@ -20,7 +22,7 @@ pub fn run(io: std.Io, allocator: std.mem.Allocator, out_terminal: std.Io.Termin
         .tag = .connect_request,
         .u = .{
             .connect_request = .{
-                .setup_ok = false,
+                .setup_ok = true,
                 .version = .{
                     .major = fip.MAJOR,
                     .minor = fip.MINOR,
@@ -51,17 +53,25 @@ pub fn run(io: std.Io, allocator: std.mem.Allocator, out_terminal: std.Io.Termin
     fip.print(main.ID, .info, "Sending connect request to master...");
     fip.slave.send_message(&msg, main.ID);
 
-    main.symbol_collections = try allocator.alloc(main.CSymbolCollection, main.configs.len);
+    symbol_collections = try allocator.alloc(main.CSymbolCollection, main.configs.len);
+    @memset(symbol_collections, main.CSymbolCollection{});
+    defer {
+        for (symbol_collections) |*collection| {
+            parser.free_symbols(allocator, collection.symbols);
+        }
+        allocator.free(symbol_collections);
+    }
 
-    for (main.configs, main.symbol_collections) |*config, *collection| {
+    for (main.configs, symbol_collections) |*config, *collection| {
         fip.print(main.ID, .debug, "[%s]", &config.tag);
         for (config.headers) |header| {
             fip.print(main.ID, .debug, "parsing header '%s'...", header.ptr);
 
             const start: std.Io.Timestamp = .now(io, .real);
-            const file: []const u8 = "fip.c";
-            parser.parse_file(allocator, out_terminal, compilation, file, collection) catch {
+            parser.parse_file(allocator, out_terminal, compilation, header, collection) catch |err| {
+                fip.print(main.ID, .debug, "parsing header '%s' failed...", header.ptr);
                 collection.errored = true;
+                return err;
             };
             const parse_time = @as(f64, @floatFromInt(start.untilNow(io, .real).toNanoseconds())) / std.time.ns_per_s;
             fip.print(main.ID, .debug, "parsing '%s' took %f s", header.ptr, parse_time);
@@ -130,14 +140,14 @@ pub fn handle_symbol_request(message: *const fip.Message) void {
     const symbol_response: *fip.Message.SymbolResponse = &response.u.symbol_response;
     @memcpy(symbol_response.module_name[0..main.MODULE_NAME.len], main.MODULE_NAME);
 
-    fip.print(main.ID, .debug, "symbol_list.count=%lu", main.symbol_collections.len);
+    fip.print(main.ID, .debug, "symbol_list.count=%lu", symbol_collections.len);
     symbol_response.found =
-        blk: for (main.symbol_collections) |*collection| {
+        blk: for (symbol_collections) |*collection| {
             fip.print(main.ID, .debug, "collection->symbol_count=%lu", collection.symbols.len);
             for (collection.symbols) |*symbol| {
                 if (symbol.sig.equals(&symbol_request.sig)) {
                     collection.needed = true;
-                    symbol_request.sig.clone(&symbol_response.sig);
+                    symbol.sig.clone(&symbol_response.sig);
                     break :blk true;
                 }
             }
@@ -230,7 +240,7 @@ pub fn handle_compile_request(io: std.Io, allocator: std.mem.Allocator, message:
     @memcpy(object_response.module_name[0..main.MODULE_NAME.len], main.MODULE_NAME);
 
     // We need to go through all modules and see whether they need to be compiled
-    for (main.configs, main.symbol_collections) |*cfg, *collection| {
+    for (main.configs, symbol_collections) |*cfg, *collection| {
         if (!collection.needed) {
             continue;
         }
@@ -256,7 +266,7 @@ pub fn handle_tag_request(message: *const fip.Message) void {
 
     var collection_id: usize = 0;
     var is_present: bool = false;
-    for (main.symbol_collections) |*collection| {
+    for (symbol_collections) |*collection| {
         if (std.mem.eql(u8, &collection.tag, msg_tag)) {
             is_present = true;
             break;
@@ -265,7 +275,7 @@ pub fn handle_tag_request(message: *const fip.Message) void {
     }
 
     // If tag exists but its headers failed to parse, reject it
-    if (is_present and main.symbol_collections[collection_id].errored) {
+    if (is_present and symbol_collections[collection_id].errored) {
         fip.print(main.ID, .@"error", "Headers of tag '%s' failed to parse", msg_tag);
         is_present = false;
     }
@@ -282,7 +292,7 @@ pub fn handle_tag_request(message: *const fip.Message) void {
     // We simply ping-pong between the master and the slave. The master requests new symbols until we send it an
     // empy symbol as we reached the end of the list. If we reached the end of the list then the slave will automatically
     // fall back to it's normal execution, the master does not need to send any other message to us in this case.
-    const collection: *main.CSymbolCollection = &main.symbol_collections[collection_id];
+    const collection: *main.CSymbolCollection = &symbol_collections[collection_id];
     collection.needed = true;
     for (collection.symbols, 0..) |*symbol, i| {
         fip.print(main.ID, .info, "Sending symbol %u/%u", i, collection.symbols.len);
