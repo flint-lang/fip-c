@@ -6,6 +6,7 @@ const main = @import("main.zig");
 
 pub fn parse(allocator: std.mem.Allocator) !bool {
     const toml_file: toml.toml_result_t = fip.slave.load_config(main.ID, main.MODULE_NAME);
+    defer toml.toml_free(toml_file);
 
     // Validate top-level is a table (toml.toptab)
     if (toml_file.toptab.type != toml.TOML_TABLE) {

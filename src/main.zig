@@ -7,10 +7,8 @@ const clap = @import("clap");
 
 const protocol = @import("protocol.zig");
 const parser = @import("parser.zig");
-const toml = @import("toml.zig");
 
 pub const MODULE_NAME = "fip-c";
-pub const MAX_SYMBOLS = 1000;
 
 pub export var LOG_LEVEL: fip.LogLevel = if (builtin.mode == .Debug) .debug else .warn;
 
@@ -19,7 +17,7 @@ pub const ModuleConfig = struct {
     tag: [128]u8 = @splat(0),
     headers: [][]u8 = &.{},
     command: [][]u8 = &.{},
-    output: [@as(usize, @intCast(fip.PATH_SIZE)) + 1]u8 = @splat(0),
+    output: [fip.PATH_SIZE:0]u8 = @splat(0),
 };
 
 /// c_symbol_t
@@ -88,7 +86,7 @@ pub var ID: u32 = 0;
 
 pub var configs: []ModuleConfig = &.{};
 
-pub var symbol_collections: std.ArrayList(CSymbolCollection) = .empty;
+pub var symbol_collections: []CSymbolCollection = &.{};
 
 const parsers = .{
     .slave_id = clap.parsers.int(u32, 10),
@@ -129,9 +127,9 @@ pub fn main(init: std.process.Init) !u8 {
     };
     const cache_path: []const u8 =
         if (builtin.target.os.tag == .windows)
-            try std.Io.Dir.path.resolve(init.gpa, &.{ cache_env_path, "Flint", "Cache", "fip-c" })
+            try std.Io.Dir.path.resolve(init.gpa, &.{ cache_env_path, "Flint", "Cache", MODULE_NAME })
         else
-            try std.Io.Dir.path.resolve(init.gpa, &.{ cache_env_path, "flint", "fip-c" });
+            try std.Io.Dir.path.resolve(init.gpa, &.{ cache_env_path, "flint", MODULE_NAME });
     defer init.gpa.free(cache_path);
 
     const aro_include_path: []const u8 = try std.Io.Dir.path.resolve(init.gpa, &.{ cache_path, "include" });
@@ -159,7 +157,7 @@ pub fn main(init: std.process.Init) !u8 {
         return 0;
     }
     if (res.args.version != 0) {
-        try stdout.print("fip-c v{s} ({s}, {s})", .{ defines.version, defines.hash, defines.date });
+        try stdout.print("{s} v{s} ({s}, {s})", .{ MODULE_NAME, defines.version, defines.hash, defines.date });
         if (builtin.mode == .Debug) {
             try stdout.print(" [debug]", .{});
         }
@@ -174,11 +172,11 @@ pub fn main(init: std.process.Init) !u8 {
         return 1;
     };
 
-    defer symbol_collections.deinit(init.gpa);
     defer {
-        for (symbol_collections.items) |*collection| {
+        for (symbol_collections) |*collection| {
             parser.free_symbols(init.gpa, collection.symbols);
         }
+        init.gpa.free(symbol_collections);
     }
 
     const out_terminal: std.Io.Terminal = .{
@@ -217,34 +215,11 @@ pub fn main(init: std.process.Init) !u8 {
     try toolchain.defineSystemIncludes();
     try compilation.initSearchPath(driver.includes.items, false);
 
-    defer toml.free_configs(init.gpa);
-    if (!try toml.parse(init.gpa)) {
-        fip.print(ID, .@"error", "Failed to parse '.fip/config/fip-c.toml' file, aborting...");
-        return 1;
+    if (builtin.os.tag == .windows) {
+        windows_crt.disable_crlf_translations();
     }
 
-    const file: []const u8 = "main.c";
-    if (try parser.parse_file(init.gpa, out_terminal, &compilation, file)) |collection| {
-        symbol_collections.append(init.gpa, collection) catch |err| {
-            parser.free_symbols(init.gpa, collection.symbols);
-            return err;
-        };
-    } else {
-        fip.print(ID, .@"error", "Unable to parse file '%s'", file.ptr);
-        return 1;
-    }
-
-    for (configs) |*config| {
-        fip.print(ID, .debug, "[%s]", &config.tag);
-        for (config.headers, 0..) |header, i| {
-            fip.print(ID, .debug, "  header[%lu]  = \"%s\"", i, header.ptr);
-        }
-        for (config.command, 0..) |command, i| {
-            fip.print(ID, .debug, "  command[%lu] = \"%s\"", i, command.ptr);
-        }
-        fip.print(ID, .debug, "  output     = \"%s\"", &config.output);
-    }
-    return 0;
+    return protocol.run(init.io, init.gpa, out_terminal, &compilation) catch 1;
 }
 
 fn printHelp(writer: *std.Io.Writer) !void {
@@ -261,6 +236,24 @@ fn printHelp(writer: *std.Io.Writer) !void {
     });
     try writer.flush();
 }
+
+const windows_crt = if (builtin.os.tag == .windows) struct {
+    pub extern "c" fn _fileno(stream: *anyopaque) c_int;
+    pub extern "c" fn _setmode(fd: c_int, mode: c_int) c_int;
+
+    pub const _O_BINARY: c_int = 0x8000;
+
+    // The CRT exports these as FILE*
+    pub extern "c" var stdin: *anyopaque;
+    pub extern "c" var stdout: *anyopaque;
+
+    // Disable CRLF <-> LF translations so FIP messages are sent as raw bytes.
+    // Must be done before any FIP stdio I/O happens.
+    pub fn disable_crlf_translations() void {
+        _setmode(_fileno(stdout), _O_BINARY);
+        _setmode(_fileno(stdin), _O_BINARY);
+    }
+} else struct {};
 
 test "refAllDecls" {
     std.testing.refAllDecls(@This());

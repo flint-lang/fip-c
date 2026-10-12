@@ -12,7 +12,8 @@ pub fn parse_file(
     terminal: std.Io.Terminal,
     compilation: *aro.Compilation,
     file_path: []const u8,
-) !?main.CSymbolCollection {
+    collection: *main.CSymbolCollection,
+) !void {
     var preproc = try aro.Preprocessor.init(compilation, .testing);
     defer preproc.deinit();
     try preproc.addBuiltinMacros();
@@ -20,7 +21,7 @@ pub fn parse_file(
     _ = try preproc.preprocess(builtin_macros);
 
     const source = try compilation.addSourceFromPath(file_path);
-    const eof = preproc.preprocess(source) catch return null;
+    const eof = try preproc.preprocess(source);
     try preproc.addToken(eof);
 
     var tree: aro.Tree = try aro.Parser.parse(&preproc);
@@ -64,17 +65,11 @@ pub fn parse_file(
                     const param_name: []const u8 = param.name.lookup(compilation);
                     arg.name = @splat(0);
                     @memcpy(arg.name[0..@min(param_name.len, fip.NAME_SIZE)], param_name);
-                    if (!try get_type(compilation, symbols, &param.qt, &arg.type)) {
-                        free_symbol_list(allocator, &symbols);
-                        return null;
-                    }
+                    try get_type(compilation, symbols, &param.qt, &arg.type);
                 }
 
                 var ret_type: fip.Type = .{ .tag = .primitive, .u = .{ .primitive = .void } };
-                if (!try get_type(compilation, symbols, &fn_type.return_type, &ret_type)) {
-                    free_symbol_list(allocator, &symbols);
-                    return null;
-                }
+                try get_type(compilation, symbols, &fn_type.return_type, &ret_type);
                 sym_fn.rets_len = 0;
                 sym_fn.rets = undefined;
                 if (ret_type.tag != .primitive and ret_type.u.primitive != .void) {
@@ -92,9 +87,7 @@ pub fn parse_file(
                     .tag = .primitive,
                     .u = .{ .primitive = .void },
                 };
-                if (!try get_type(compilation, symbols, &typedef.qt, &out)) {
-                    return null;
-                }
+                try get_type(compilation, symbols, &typedef.qt, &out);
                 if (last_symbol.get_name()) |last_symbol_name| {
                     std.debug.assert(std.mem.eql(u8, last_symbol_name, tree.tokSlice(typedef.name_tok)));
                 } else {
@@ -153,9 +146,7 @@ pub fn parse_file(
                 data.field_count = record.fields.len;
                 data.fields = (try fip_alloc.alloc(fip.Signature.Data.Field, data.field_count)).ptr;
                 for (record.fields, data.fields[0..data.field_count]) |*rfield, *dfield| {
-                    if (!try get_type(compilation, symbols, &rfield.qt, &dfield.type)) {
-                        return null;
-                    }
+                    try get_type(compilation, symbols, &rfield.qt, &dfield.type);
                     const field_name: []const u8 = rfield.name.lookup(compilation);
                     const field_name_len: usize = @min(field_name.len, fip.NAME_SIZE);
                     dfield.name = @splat(0);
@@ -185,14 +176,13 @@ pub fn parse_file(
         symbol.sig.print(main.ID);
     }
 
-    const collection: main.CSymbolCollection = .{
+    collection.* = .{
         .needed = false,
         .errored = false,
         .tag = @splat(0),
         .symbols = try symbols.toOwnedSlice(allocator),
     };
     // TODO: Set tag
-    return collection;
 }
 
 fn free_symbol(symbol: *main.CSymbol) void {
@@ -281,7 +271,7 @@ fn get_type(
     symbols: std.ArrayList(main.CSymbol),
     qt_in: *const aro.QualType,
     out: *fip.Type,
-) !bool {
+) !void {
     out.* = switch (qt_in.type(compilation)) {
         .void => .{
             .is_mutable = !qt_in.@"const",
@@ -327,11 +317,11 @@ fn get_type(
                     .ulong, .ulong_long => .u64,
                     .int128 => {
                         fip.print(main.ID, .@"error", "FIP cannot hanlde int128 types");
-                        return false;
+                        return error.CannotHandleType;
                     },
                     .uint128 => {
                         fip.print(main.ID, .@"error", "FIP cannot hanlde uint128 types");
-                        return false;
+                        return error.CannotHandleType;
                     },
                 },
             },
@@ -343,69 +333,69 @@ fn get_type(
                 .primitive = switch (float) {
                     .bf16 => {
                         fip.print(main.ID, .@"error", "FIP cannot handle 'bf16' types");
-                        return false;
+                        return error.CannotHandleType;
                     },
                     .fp16, .float16 => {
                         fip.print(main.ID, .@"error", "FIP cannot handle 'f16' types");
-                        return false;
+                        return error.CannotHandleType;
                     },
                     .float, .float32 => .f32,
                     .double, .float64 => .f32,
                     .long_double => {
                         fip.print(main.ID, .@"error", "FIP cannot handle 'long double' types");
-                        return false;
+                        return error.CannotHandleType;
                     },
                     .float128 => {
                         fip.print(main.ID, .@"error", "FIP cannot handle 'f128' types");
-                        return false;
+                        return error.CannotHandleType;
                     },
                     .float32x => {
                         fip.print(main.ID, .@"error", "FIP cannot handle 'float32x' types");
-                        return false;
+                        return error.CannotHandleType;
                     },
                     .float64x => {
                         fip.print(main.ID, .@"error", "FIP cannot handle 'float64x' types");
-                        return false;
+                        return error.CannotHandleType;
                     },
                     .float128x => {
                         fip.print(main.ID, .@"error", "FIP cannot handle 'float128x' types");
-                        return false;
+                        return error.CannotHandleType;
                     },
                     .dfloat32 => {
                         fip.print(main.ID, .@"error", "FIP cannot handle 'dfloat32' types");
-                        return false;
+                        return error.CannotHandleType;
                     },
                     .dfloat64 => {
                         fip.print(main.ID, .@"error", "FIP cannot handle 'dfloat64' types");
-                        return false;
+                        return error.CannotHandleType;
                     },
                     .dfloat128 => {
                         fip.print(main.ID, .@"error", "FIP cannot handle 'dfloat128' types");
-                        return false;
+                        return error.CannotHandleType;
                     },
                     .dfloat64x => {
                         fip.print(main.ID, .@"error", "FIP cannot handle 'dfloat64x' types");
-                        return false;
+                        return error.CannotHandleType;
                     },
                 },
             },
         },
         .complex => {
             fip.print(main.ID, .@"error", "FIP cannot handle complex types");
-            return false;
+            return error.CannotHandleType;
         },
         .bit_int => {
             fip.print(main.ID, .@"error", "FIP cannot handle bit int types");
-            return false;
+            return error.CannotHandleType;
         },
         .atomic => {
             fip.print(main.ID, .@"error", "FIP cannot handle atomic types");
-            return false;
+            return error.CannotHandleType;
         },
 
         .func => {
             fip.print(main.ID, .@"error", "FIP cannot handle function types");
-            return false;
+            return error.CannotHandleType;
         },
         .pointer => |ptr| blk: {
             const child_base = ptr.child.base(compilation);
@@ -432,9 +422,8 @@ fn get_type(
                 },
                 else => {},
             }
-            if (!inner_initialized and !try get_type(compilation, symbols, &ptr.child, inner)) {
-                fip_alloc.destroy(inner);
-                return false;
+            if (!inner_initialized) {
+                try get_type(compilation, symbols, &ptr.child, inner);
             }
             break :blk .{
                 .is_mutable = !qt_in.@"const",
@@ -446,25 +435,22 @@ fn get_type(
             const len: usize = switch (arr.len) {
                 .incomplete => {
                     fip.print(main.ID, .@"error", "FIP cannot handle dynamic array types");
-                    return false;
+                    return error.CannotHandleType;
                 },
                 .fixed => |size| size,
                 .static => |size| size,
                 .variable => {
                     fip.print(main.ID, .@"error", "FIP cannot handle variable length array types");
-                    return false;
+                    return error.CannotHandleType;
                 },
                 .unspecified_variable => {
                     fip.print(main.ID, .@"error", "FIP cannot handle unspecified variable length array types");
-                    return false;
+                    return error.CannotHandleType;
                 },
             };
             const inner: *fip.Type = try fip_alloc.create(fip.Type);
             errdefer fip_alloc.destroy(inner);
-            if (!try get_type(compilation, symbols, &arr.elem, inner)) {
-                fip_alloc.destroy(inner);
-                return false;
-            }
+            try get_type(compilation, symbols, &arr.elem, inner);
             break :blk .{
                 .is_mutable = !qt_in.@"const",
                 .tag = .array,
@@ -478,7 +464,7 @@ fn get_type(
         },
         .vector => {
             fip.print(main.ID, .@"error", "FIP cannot handle vector types");
-            return false;
+            return error.CannotHandleType;
         },
 
         .@"struct" => |rec| blk: {
@@ -516,10 +502,7 @@ fn get_type(
 
             // Fill each field's type (in declaration order)
             for (rec.fields, fields) |*field, *ftype| {
-                if (!try get_type(compilation, symbols, &field.qt, ftype)) {
-                    free_type_array(fields[0..out_struct.field_count]);
-                    return false;
-                }
+                try get_type(compilation, symbols, &field.qt, ftype);
             }
 
             break :blk .{
@@ -530,7 +513,7 @@ fn get_type(
         },
         .@"union" => {
             fip.print(main.ID, .@"error", "FIP cannot handle union types");
-            return false;
+            return error.CannotHandleType;
         },
         .@"enum" => |enum_type| blk: {
             var out_enum: fip.Type.Enum = .{
@@ -563,7 +546,7 @@ fn get_type(
             };
         },
 
-        .typeof => |typeof| return !try get_type(compilation, symbols, &typeof.base, out),
+        .typeof => |typeof| return try get_type(compilation, symbols, &typeof.base, out),
         .typedef => |typedef| if (get_named_type(symbols, typedef.name.lookup(compilation))) |named|
             .{
                 .is_mutable = !qt_in.@"const",
@@ -574,7 +557,6 @@ fn get_type(
             return try get_type(compilation, symbols, &typedef.base, out),
         .attributed => |attributed| return try get_type(compilation, symbols, &attributed.base, out),
     };
-    return true;
 }
 
 test "refAllDecls" {
