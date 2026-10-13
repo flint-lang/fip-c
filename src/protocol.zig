@@ -10,12 +10,14 @@ var symbol_collections: []main.CSymbolCollection = &.{};
 
 pub fn run(io: std.Io, allocator: std.mem.Allocator, out_terminal: std.Io.Terminal, compilation: *aro.Compilation) !u8 {
     fip.print(main.ID, .info, "starting...");
+    defer fip.print(main.ID, .info, "ending...");
 
     // Initialize slave for stdio communication
     if (!fip.slave.init(main.ID)) {
         fip.print(main.ID, .@"error", "Failed to initialize slave");
         return 1;
     }
+    defer fip.slave.cleanup();
     fip.print(main.ID, .info, "Successfully initialized slave communication");
 
     var msg: fip.Message = .{
@@ -85,43 +87,36 @@ pub fn run(io: std.Io, allocator: std.mem.Allocator, out_terminal: std.Io.Termin
     }
 
     // Main loop - wait for messages from master
-    var is_running = true;
-    while (is_running) {
+    return blk: while (true) {
+        // Recieve message is blocking, so we don't need to wait any time at all
         if (!fip.slave.recieve_message()) {
-            fip.print(main.ID, .warn, "Master disconnected, shutting down...");
-            break;
-        } else {
-            // Only print the first time we receive a message
-            fip.print(main.ID, .debug, "Received message");
-            var message: fip.Message = .{};
-            message.decode();
-
-            switch (message.tag) {
-                .unknown => fip.print(main.ID, .warn, "Received unknown message"),
-                .connect_request => @panic("Slave recieved 'connect_request' message, should not be possible"),
-                .symbol_request => handle_symbol_request(&message),
-                .symbol_response => @panic("Slave recieved 'symbol_response' message, should not be possible"),
-                .compile_request => handle_compile_request(io, allocator, &message),
-                .object_response => @panic("Slave recieved 'symbol_response' message, should not be possible"),
-                .tag_request => handle_tag_request(&message),
-                .tag_present_response => @panic("Slave recieved 'tag_present_response' message, should not be possible"),
-                .tag_next_symbol_request => @panic("Slave recieved 'tag_next_symbol_request' in main loop"),
-                .tag_symbol_response => @panic("Slave recieved 'tag_symbol_response' message, should not be possible"),
-                .kill => {
-                    fip.print(main.ID, .info, "Received Kill Command, shutting down...");
-                    is_running = false;
-                },
-            }
-            message.free();
+            fip.print(main.ID, .@"error", "Master died, shutting down...");
+            break :blk 1;
         }
 
-        // Just wait for N milliseconds before the new loop iteration
-        try io.sleep(.fromMilliseconds(fip.slave.DELAY_MS), .real);
-    }
+        // Only print the first time we receive a message
+        fip.print(main.ID, .debug, "Received message");
+        var message: fip.Message = .{};
+        message.decode();
+        defer message.free();
 
-    fip.slave.cleanup();
-    fip.print(main.ID, .info, "ending...");
-    return 0;
+        switch (message.tag) {
+            .unknown => fip.print(main.ID, .warn, "Received unknown message"),
+            .connect_request => @panic("Slave recieved 'connect_request' message, should not be possible"),
+            .symbol_request => handle_symbol_request(&message),
+            .symbol_response => @panic("Slave recieved 'symbol_response' message, should not be possible"),
+            .compile_request => handle_compile_request(io, allocator, &message),
+            .object_response => @panic("Slave recieved 'symbol_response' message, should not be possible"),
+            .tag_request => handle_tag_request(&message) catch break :blk 1,
+            .tag_present_response => @panic("Slave recieved 'tag_present_response' message, should not be possible"),
+            .tag_next_symbol_request => @panic("Slave recieved 'tag_next_symbol_request' in main loop"),
+            .tag_symbol_response => @panic("Slave recieved 'tag_symbol_response' message, should not be possible"),
+            .kill => {
+                fip.print(main.ID, .info, "Received Kill Command, shutting down...");
+                break :blk 0;
+            },
+        }
+    } else unreachable;
 }
 
 pub fn handle_symbol_request(message: *const fip.Message) void {
@@ -257,7 +252,7 @@ pub fn handle_compile_request(io: std.Io, allocator: std.mem.Allocator, message:
     fip.slave.send_message(&response, main.ID);
 }
 
-pub fn handle_tag_request(message: *const fip.Message) void {
+pub fn handle_tag_request(message: *const fip.Message) error{MasterDied}!void {
     std.debug.assert(message.tag == .tag_request);
     fip.print(main.ID, .info, "Tag Request Received");
     const msg_tag: *const [fip.NAME_SIZE:0]u8 = &message.u.tag_request.tag;
@@ -307,8 +302,9 @@ pub fn handle_tag_request(message: *const fip.Message) void {
     for (collection.symbols, 0..) |*symbol, i| {
         fip.print(main.ID, .info, "Sending symbol %u/%u", i, collection.symbols.len);
         // Wait for master to request the next symbol
-        while (!fip.slave.recieve_message()) {
-            fip.print(main.ID, .warn, "No message from master yet...");
+        if (!fip.slave.recieve_message()) {
+            fip.print(main.ID, .@"error", "Master died, shutting down...");
+            return error.MasterDied;
         }
         var next_message: fip.Message = .{};
         next_message.decode();
@@ -339,8 +335,9 @@ pub fn handle_tag_request(message: *const fip.Message) void {
     }
 
     // Wait for master to request the next symbol before sending the empty symbol to it
-    while (!fip.slave.recieve_message()) {
-        fip.print(main.ID, .warn, "No message from master yet...");
+    if (!fip.slave.recieve_message()) {
+        fip.print(main.ID, .@"error", "Master died, shutting down...");
+        return error.MasterDied;
     }
     // Only print the first time we receive a message
     var next_message: fip.Message = .{};
