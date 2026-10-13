@@ -195,6 +195,8 @@ pub fn parse_file(
 
 fn free_symbol(symbol: *main.CSymbol) void {
     switch (symbol.sig.tag) {
+        .unknown => {},
+        .alias => symbol.sig.u.alias.type.free(),
         .@"fn" => {
             const fn_sig = &symbol.sig.u.@"fn";
             if (fn_sig.args_len > 0) {
@@ -233,7 +235,7 @@ fn free_symbol(symbol: *main.CSymbol) void {
             enum_sig.values = undefined;
             enum_sig.value_count = 0;
         },
-        else => {},
+        .@"opaque" => {},
     }
 }
 
