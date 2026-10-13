@@ -80,20 +80,21 @@ pub fn parse_file(
                 sym_fn.rets[0] = ret_type;
             },
             .typedef => |typedef| {
-                const name_slice = tree.tokSlice(typedef.name_tok);
-                fip.print(main.ID, .debug, "typedef.name = '%.*s'", @as(i32, @intCast(name_slice.len)), name_slice.ptr);
-                std.debug.assert(symbols.items.len > 1);
-                var last_symbol: *main.CSymbol = &symbols.items[symbols.items.len - 2];
+                const name = tree.tokSlice(typedef.name_tok);
 
                 // If the last thing we parsed was an anonymous definition, we assume that this type def defines it
-                if (last_symbol.get_name() == null) {
-                    // Change the name of the last parsed symbol and pop the typedef to make it "disappear"
-                    last_symbol.set_name(tree.tokSlice(typedef.name_tok));
-                    _ = symbols.pop();
+                if (symbols.items.len > 1) {
+                    var last_symbol: *main.CSymbol = &symbols.items[symbols.items.len - 2];
+                    if (last_symbol.get_name() == null) {
+                        // Change the name of the last parsed symbol and pop the typedef to make it "disappear"
+                        last_symbol.set_name(name);
+                        _ = symbols.pop();
+                        continue;
+                    }
                 }
                 // It is a type alias
                 symbol.sig.tag = .alias;
-                symbol.set_name(tree.tokSlice(typedef.name_tok));
+                symbol.set_name(name);
                 try get_type(compilation, symbols, &typedef.qt, &symbol.sig.u.alias.type);
             },
             .variable => |variable| {
@@ -139,10 +140,17 @@ pub fn parse_file(
                 symbol.sig.tag = .data;
                 // Don't set the name if the token is anything other than an identifier
                 const id = tree.tokens.items(.id)[struct_decl.name_or_kind_tok];
+                var target: *main.CSymbol = symbol;
                 if (id == .identifier) {
-                    symbol.set_name(tree.tokSlice(struct_decl.name_or_kind_tok));
+                    const name = tree.tokSlice(struct_decl.name_or_kind_tok);
+                    if (find_opaque_symbol(symbols, name)) |existing| {
+                        _ = symbols.pop();
+                        target = existing;
+                        symbol.sig.tag = .data;
+                    }
+                    target.set_name(name);
                 }
-                const data = &symbol.sig.u.data;
+                const data = &target.sig.u.data;
                 data.field_count = record.fields.len;
                 data.fields = (try fip_alloc.alloc(fip.Signature.Data.Field, data.field_count)).ptr;
                 for (record.fields, data.fields[0..data.field_count]) |*rfield, *dfield| {
@@ -154,8 +162,8 @@ pub fn parse_file(
                 }
             },
             .struct_forward_decl => |struct_forward_decl| {
-                std.debug.print("Found struct forward: {s}\n", .{tree.tokSlice(struct_forward_decl.name_or_kind_tok)});
-                @panic("TODO");
+                symbol.sig.tag = .@"opaque";
+                symbol.set_name(tree.tokSlice(struct_forward_decl.name_or_kind_tok));
             },
             .union_decl => |union_decl| {
                 std.debug.print("Found union: {s}\n", .{tree.tokSlice(union_decl.name_or_kind_tok)});
@@ -261,6 +269,19 @@ fn get_named_type(symbols: std.ArrayList(main.CSymbol), name: []const u8) ?fip.T
             if (std.mem.eql(u8, symbol_name, name)) {
                 return named_type;
             }
+        }
+    }
+    return null;
+}
+
+fn find_opaque_symbol(symbols: std.ArrayList(main.CSymbol), name: []const u8) ?*main.CSymbol {
+    const cmp_size = @min(name.len, fip.NAME_SIZE);
+    for (symbols.items) |*symbol| {
+        if (symbol.sig.tag != .@"opaque") {
+            continue;
+        }
+        if (std.mem.eql(u8, symbol.sig.u.@"opaque".name[0..cmp_size], name[0..cmp_size])) {
+            return symbol;
         }
     }
     return null;
