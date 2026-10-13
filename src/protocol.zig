@@ -312,25 +312,22 @@ pub fn handle_tag_request(message: *const fip.Message) void {
         }
         var next_message: fip.Message = .{};
         next_message.decode();
-        switch (next_message.tag) {
-            .tag_next_symbol_request => break,
-            else => {
-                fip.print(
-                    main.ID,
-                    .@"error",
-                    "Unexpected message from master: '%s', expected 'tag_next_symbol_request'",
-                    @tagName(next_message.tag).ptr,
-                );
-                next_message.free();
-                return;
-            },
+        if (next_message.tag != .tag_next_symbol_request) {
+            fip.print(
+                main.ID,
+                .@"error",
+                "Unexpected message from master: '%s', expected 'tag_next_symbol_request'",
+                @tagName(next_message.tag).ptr,
+            );
+            next_message.free();
+            return;
         }
         response = .{
             .tag = .tag_symbol_response,
             .u = .{
                 .tag_symbol_response = .{
                     .is_empty = false,
-                    .type = symbol.sig,
+                    .sig = fip.Signature{},
                 },
             },
         };
