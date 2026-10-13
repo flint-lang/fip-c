@@ -124,6 +124,26 @@ pub fn main(init: std.process.Init) !u8 {
     };
     defer res.deinit();
 
+    if (res.args.help != 0) {
+        try printHelp(stdout);
+        return 0;
+    }
+    if (res.args.version != 0) {
+        try stdout.print("{s} v{s} ({s}, {s})", .{ MODULE_NAME, defines.version, defines.hash, defines.date });
+        if (builtin.mode == .Debug) {
+            try stdout.print(" [debug]", .{});
+        }
+        try stdout.print("\n └─ Flint Interop Protocol v{d}.{d}.{d}\n", .{ fip.MAJOR, fip.MINOR, fip.PATCH });
+        try stdout.flush();
+        return 0;
+    }
+
+    ID = res.positionals[0] orelse {
+        std.log.err("Missing required argument <slave_id>", .{});
+        try printHelp(stderr);
+        return 1;
+    };
+
     const cache_env_var = if (builtin.target.os.tag == .windows) "LOCALAPPDATA" else "XDG_CACHE_HOME";
     const cache_env_path: []const u8 = init.environ_map.get(cache_env_var) orelse {
         std.log.err("Failed to get environment variable '{s}'", .{cache_env_var});
@@ -155,26 +175,6 @@ pub fn main(init: std.process.Init) !u8 {
             }
         };
     }
-
-    if (res.args.help != 0) {
-        try printHelp(stdout);
-        return 0;
-    }
-    if (res.args.version != 0) {
-        try stdout.print("{s} v{s} ({s}, {s})", .{ MODULE_NAME, defines.version, defines.hash, defines.date });
-        if (builtin.mode == .Debug) {
-            try stdout.print(" [debug]", .{});
-        }
-        try stdout.print("\n └─ Flint Interop Protocol v{d}.{d}.{d}\n", .{ fip.MAJOR, fip.MINOR, fip.PATCH });
-        try stdout.flush();
-        return 0;
-    }
-
-    ID = res.positionals[0] orelse {
-        std.log.err("Missing required argument <slave_id>", .{});
-        try printHelp(stderr);
-        return 1;
-    };
 
     const out_terminal: std.Io.Terminal = .{
         .writer = stderr,
