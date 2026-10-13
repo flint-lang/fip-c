@@ -14,7 +14,7 @@ pub export var LOG_LEVEL: fip.LogLevel = if (builtin.mode == .Debug) .debug else
 
 /// fip_module_config_t
 pub const ModuleConfig = struct {
-    tag: [128]u8 = @splat(0),
+    tag: [fip.NAME_SIZE:0]u8 = @splat(0),
     headers: [][]u8 = &.{},
     command: [][]u8 = &.{},
     output: [fip.PATH_SIZE:0]u8 = @splat(0),
@@ -83,7 +83,7 @@ pub const CSymbolCollection = struct {
     /// because a header file does not exist). An errored collection is never
     /// reported as present to the master.
     errored: bool = false,
-    tag: [128]u8 = @splat(0),
+    tag: [fip.NAME_SIZE:0]u8 = @splat(0),
     symbols: []CSymbol = &.{},
 };
 

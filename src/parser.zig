@@ -13,6 +13,7 @@ pub fn parse_file(
     compilation: *aro.Compilation,
     file_path: []const u8,
     collection: *main.CSymbolCollection,
+    config_tag: *const [fip.NAME_SIZE:0]u8,
 ) !void {
     var preproc = try aro.Preprocessor.init(compilation, .testing);
     defer preproc.deinit();
@@ -190,7 +191,7 @@ pub fn parse_file(
         .tag = @splat(0),
         .symbols = try symbols.toOwnedSlice(allocator),
     };
-    // TODO: Set tag
+    @memcpy(&collection.tag, config_tag);
 }
 
 fn free_symbol(symbol: *main.CSymbol) void {

@@ -70,7 +70,7 @@ pub fn run(io: std.Io, allocator: std.mem.Allocator, out_terminal: std.Io.Termin
             fip.print(main.ID, .debug, "parsing header '%s'...", header.ptr);
 
             const start: std.Io.Timestamp = .now(io, .real);
-            parser.parse_file(allocator, out_terminal, compilation, header, collection) catch |err| {
+            parser.parse_file(allocator, out_terminal, compilation, header, collection, &config.tag) catch |err| {
                 fip.print(main.ID, .debug, "parsing header '%s' failed...", header.ptr);
                 collection.errored = true;
                 return err;
@@ -261,6 +261,7 @@ pub fn handle_tag_request(message: *const fip.Message) void {
     std.debug.assert(message.tag == .tag_request);
     fip.print(main.ID, .info, "Tag Request Received");
     const msg_tag: *const [fip.NAME_SIZE:0]u8 = &message.u.tag_request.tag;
+    fip.print(main.ID, .info, "Searching for tag '%s'...", msg_tag);
 
     var response: fip.Message = .{
         .tag = .tag_present_response,
@@ -269,6 +270,7 @@ pub fn handle_tag_request(message: *const fip.Message) void {
     var collection_id: usize = 0;
     var is_present: bool = false;
     for (symbol_collections) |*collection| {
+        fip.print(main.ID, .debug, "Checking if tag '%s' equals searched-for tag '%s'...", &collection.tag, msg_tag);
         if (std.mem.eql(u8, &collection.tag, msg_tag)) {
             is_present = true;
             break;
@@ -280,6 +282,12 @@ pub fn handle_tag_request(message: *const fip.Message) void {
     if (is_present and symbol_collections[collection_id].errored) {
         fip.print(main.ID, .@"error", "Headers of tag '%s' failed to parse", msg_tag);
         is_present = false;
+    }
+
+    if (is_present) {
+        fip.print(main.ID, .debug, "Tag '%s' was found in this module", msg_tag);
+    } else {
+        fip.print(main.ID, .debug, "Tag '%s' was not found in this module", msg_tag);
     }
 
     response.u.tag_present_response.is_present = is_present;
