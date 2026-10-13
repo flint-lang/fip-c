@@ -70,13 +70,14 @@ pub fn parse_file(
 
                 var ret_type: fip.Type = .{ .tag = .primitive, .u = .{ .primitive = .void } };
                 try get_type(compilation, symbols, &fn_type.return_type, &ret_type);
-                sym_fn.rets_len = 0;
-                sym_fn.rets = undefined;
-                if (ret_type.tag != .primitive and ret_type.u.primitive != .void) {
-                    sym_fn.rets_len = 1;
-                    sym_fn.rets = (try fip_alloc.alloc(fip.Type, 1)).ptr;
-                    sym_fn.rets[0] = ret_type;
+                if (ret_type.tag == .primitive and ret_type.u.primitive == .void) {
+                    sym_fn.rets_len = 0;
+                    sym_fn.rets = undefined;
+                    continue;
                 }
+                sym_fn.rets_len = 1;
+                sym_fn.rets = (try fip_alloc.alloc(fip.Type, 1)).ptr;
+                sym_fn.rets[0] = ret_type;
             },
             .typedef => |typedef| {
                 const name_slice = tree.tokSlice(typedef.name_tok);
