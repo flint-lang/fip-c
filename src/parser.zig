@@ -443,6 +443,15 @@ fn get_type(
                     };
                     inner_initialized = true;
                 },
+                .func => {
+                    // Function pointers become a void*
+                    inner.* = .{
+                        .is_mutable = false,
+                        .tag = .primitive,
+                        .u = .{ .primitive = .void },
+                    };
+                    inner_initialized = true;
+                },
                 else => {},
             }
             if (!inner_initialized) {
