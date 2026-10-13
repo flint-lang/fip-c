@@ -427,6 +427,14 @@ fn get_type(
             // Check for recursive types
             var inner_initialized: bool = false;
             switch (child_base.type) {
+                .int => |int| switch (int) {
+                    .char, .schar => break :blk .{
+                        .is_mutable = !child_base.qt.@"const",
+                        .tag = .primitive,
+                        .u = .{ .primitive = .str },
+                    },
+                    else => {},
+                },
                 .@"struct" => |@"struct"| if (get_named_type(symbols, @"struct".name.lookup(compilation))) |named| {
                     inner.* = .{
                         .is_mutable = !qt_in.@"const",
