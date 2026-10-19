@@ -8,8 +8,7 @@ const toml = @import("toml.zig");
 
 var symbol_collections: []main.CSymbolCollection = &.{};
 
-pub fn run(io: std.Io, allocator: std.mem.Allocator, out_terminal: std.Io.Terminal, compilation: *aro.Compilation) !u8 {
-    fip.print(main.ID, .info, "starting...");
+pub fn run(io: std.Io, allocator: std.mem.Allocator, compilation: *aro.Compilation) !u8 {
     defer fip.print(main.ID, .info, "ending...");
 
     // Initialize slave for stdio communication
@@ -36,13 +35,13 @@ pub fn run(io: std.Io, allocator: std.mem.Allocator, out_terminal: std.Io.Termin
     };
     @memcpy(msg.u.connect_request.module_name[0..main.MODULE_NAME.len], main.MODULE_NAME);
 
-    defer toml.free_configs(allocator);
     if (!try toml.parse(allocator)) {
         fip.print(main.ID, .@"error", "Failed to parse '.fip/config/%s.toml' file, aborting...", main.MODULE_NAME);
         msg.u.connect_request.setup_ok = false;
     } else {
         fip.print(main.ID, .info, "Parsed '.fip/config/%s.toml' file successfully", main.MODULE_NAME);
     }
+    defer toml.free_configs(allocator);
 
     msg.print(main.ID);
 
@@ -66,17 +65,28 @@ pub fn run(io: std.Io, allocator: std.mem.Allocator, out_terminal: std.Io.Termin
         allocator.free(symbol_collections);
     }
 
+    const ast_file = blk: {
+        const sub_path = try std.fmt.allocPrint(allocator, ".fip/log/slave_{d}.ast", .{main.ID});
+        defer allocator.free(sub_path);
+        break :blk try std.Io.Dir.cwd().createFile(io, sub_path, .{});
+    };
+    defer ast_file.close(io);
+    var ast_file_writer = ast_file.writer(io, &.{});
+    const ast_file_stream = &ast_file_writer.interface;
+
     for (main.configs, symbol_collections) |*config, *collection| {
         fip.print(main.ID, .debug, "[%s]", &config.tag);
         for (config.headers) |header| {
             fip.print(main.ID, .debug, "parsing header '%s'...", header.ptr);
 
             const start: std.Io.Timestamp = .now(io, .real);
-            parser.parse_file(allocator, out_terminal, compilation, header, collection, &config.tag) catch |err| {
+            try ast_file_stream.print("==== BEGIN OF FILE '{s}' ====\n", .{header});
+            parser.parse_file(allocator, ast_file_stream, compilation, header, collection, &config.tag) catch |err| {
                 fip.print(main.ID, .debug, "parsing header '%s' failed...", header.ptr);
                 collection.errored = true;
                 return err;
             };
+            try ast_file_stream.print("===== END OF FILE '{s}' =====\n", .{header});
             const parse_time = @as(f64, @floatFromInt(start.untilNow(io, .real).toNanoseconds())) / std.time.ns_per_s;
             fip.print(main.ID, .debug, "parsing '%s' took %f s", header.ptr, parse_time);
         }
@@ -95,13 +105,14 @@ pub fn run(io: std.Io, allocator: std.mem.Allocator, out_terminal: std.Io.Termin
         }
 
         // Only print the first time we receive a message
-        fip.print(main.ID, .debug, "Received message");
+        fip.print(main.ID, .debug, "Recieved message");
         var message: fip.Message = .{};
         message.decode();
         defer message.free();
+        message.print(main.ID);
 
         switch (message.tag) {
-            .unknown => fip.print(main.ID, .warn, "Received unknown message"),
+            .unknown => fip.print(main.ID, .warn, "Recieved unknown message"),
             .connect_request => @panic("Slave recieved 'connect_request' message, should not be possible"),
             .symbol_request => handle_symbol_request(&message),
             .symbol_response => @panic("Slave recieved 'symbol_response' message, should not be possible"),
@@ -112,7 +123,7 @@ pub fn run(io: std.Io, allocator: std.mem.Allocator, out_terminal: std.Io.Termin
             .tag_next_symbol_request => @panic("Slave recieved 'tag_next_symbol_request' in main loop"),
             .tag_symbol_response => @panic("Slave recieved 'tag_symbol_response' message, should not be possible"),
             .kill => {
-                fip.print(main.ID, .info, "Received Kill Command, shutting down...");
+                fip.print(main.ID, .info, "Recieved Kill Command, shutting down...");
                 break :blk 0;
             },
         }
@@ -122,7 +133,7 @@ pub fn run(io: std.Io, allocator: std.mem.Allocator, out_terminal: std.Io.Termin
 pub fn handle_symbol_request(message: *const fip.Message) void {
     std.debug.assert(message.tag == .symbol_request);
     const symbol_request: *const fip.Message.SymbolRequest = &message.u.symbol_request;
-    fip.print(main.ID, .info, "Symbol Request Received");
+    fip.print(main.ID, .info, "Symbol Request Recieved");
 
     var response: fip.Message = .{
         .tag = .symbol_response,
@@ -223,7 +234,7 @@ pub fn compile_module(
 
 pub fn handle_compile_request(io: std.Io, allocator: std.mem.Allocator, message: *const fip.Message) void {
     std.debug.assert(message.tag == .compile_request);
-    fip.print(main.ID, .info, "Compile Request Received");
+    fip.print(main.ID, .info, "Compile Request Recieved");
     var response: fip.Message = .{
         .tag = .object_response,
         .u = .{
@@ -234,6 +245,7 @@ pub fn handle_compile_request(io: std.Io, allocator: std.mem.Allocator, message:
         },
     };
     const object_response: *fip.Message.ObjectResponse = &response.u.object_response;
+    object_response.* = .{};
     @memcpy(object_response.module_name[0..main.MODULE_NAME.len], main.MODULE_NAME);
 
     // We need to go through all modules and see whether they need to be compiled
@@ -254,7 +266,7 @@ pub fn handle_compile_request(io: std.Io, allocator: std.mem.Allocator, message:
 
 pub fn handle_tag_request(message: *const fip.Message) error{MasterDied}!void {
     std.debug.assert(message.tag == .tag_request);
-    fip.print(main.ID, .info, "Tag Request Received");
+    fip.print(main.ID, .info, "Tag Request Recieved");
     const msg_tag: *const [fip.NAME_SIZE:0]u8 = &message.u.tag_request.tag;
     fip.print(main.ID, .info, "Searching for tag '%s'...", msg_tag);
 

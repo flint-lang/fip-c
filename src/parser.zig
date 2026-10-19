@@ -9,7 +9,7 @@ const fip_alloc = std.heap.c_allocator;
 
 pub fn parse_file(
     allocator: std.mem.Allocator,
-    terminal: std.Io.Terminal,
+    ast_file_stream: *std.Io.Writer,
     compilation: *aro.Compilation,
     file_path: []const u8,
     collection: *main.CSymbolCollection,
@@ -28,7 +28,8 @@ pub fn parse_file(
     var tree: aro.Tree = try aro.Parser.parse(&preproc);
     defer tree.deinit();
     if (main.LOG_LEVEL == .debug) {
-        try tree.dump(terminal);
+        try tree.dump(.{ .writer = ast_file_stream, .mode = .escape_codes });
+        try ast_file_stream.flush();
     }
 
     var symbols: std.ArrayList(main.CSymbol) = .empty;

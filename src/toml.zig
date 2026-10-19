@@ -99,9 +99,8 @@ pub fn parse(allocator: std.mem.Allocator) !bool {
                     return false;
                 }
                 const slen: usize = @intCast(elem.u.str.len);
-                sources[j] = try allocator.alloc(u8, slen + 1);
+                sources[j] = try allocator.alloc(u8, slen);
                 @memcpy(sources[j][0..slen], elem.u.str.ptr[0..slen]);
-                sources[j][slen] = '\x00';
             }
         }
         // command (optional, array of strings)
@@ -180,10 +179,10 @@ pub fn parse(allocator: std.mem.Allocator) !bool {
                     }
                     const cache_dir = ".fip/cache/";
                     const file_ext: []const u8 = if (@import("builtin").os.tag == .windows) ".obj" else ".o";
-                    const output_len: usize = cache_dir.len + fip.PATH_SIZE + file_ext.len + 1;
+                    const output_len: usize = cache_dir.len + fip.PATH_SIZE + file_ext.len;
                     // Hash the full path `.fip/cache/<tag>` as input so the string is always long enough for good hash distribution.
-                    var hash_input: [128]u8 = @splat(0);
-                    const hash_input_slice = try std.fmt.bufPrint(&hash_input, "{s}{s}", .{ cache_dir, cfg.tag });
+                    var hash_input: [cache_dir.len + cfg.tag.len]u8 = @splat(0);
+                    const hash_input_slice = std.fmt.bufPrint(&hash_input, "{s}{s}", .{ cache_dir, cfg.tag }) catch unreachable;
                     // cfg->command[cmd_idx] = (char *)malloc(output_len);
                     cfg.command[cmd_idx] = try allocator.alloc(u8, output_len);
                     // char *insert_ptr = cfg->command[cmd_idx];
@@ -200,13 +199,10 @@ pub fn parse(allocator: std.mem.Allocator) !bool {
                     insert_ptr = insert_ptr[fip.PATH_SIZE..];
                     // memcpy(insert_ptr, file_ext, ext_len);
                     @memcpy(insert_ptr[0..file_ext.len], file_ext[0..file_ext.len]);
-                    cfg.command[cmd_idx][output_len - 1] = '\x00';
-                    cfg.output[fip.PATH_SIZE] = '\x00';
                     command_output_substituted = true;
                 } else {
-                    cfg.command[cmd_idx] = try allocator.alloc(u8, slen + 1);
+                    cfg.command[cmd_idx] = try allocator.alloc(u8, slen);
                     @memcpy(cfg.command[cmd_idx][0..slen], elem.u.str.ptr[0..slen]);
-                    cfg.command[cmd_idx][slen] = '\x00';
                 }
             }
         }
@@ -255,14 +251,14 @@ pub fn free_configs(allocator: std.mem.Allocator) void {
     for (0..main.configs.len) |i| {
         const c: *main.ModuleConfig = &main.configs[i];
         if (c.headers.len > 0) {
-            for (0..c.headers.len) |j| {
-                allocator.free(c.headers[j]);
+            for (c.headers) |header| {
+                allocator.free(header);
             }
             allocator.free(c.headers);
         }
         if (c.command.len > 0) {
-            for (0..c.command.len) |j| {
-                allocator.free(c.command[j]);
+            for (c.command) |command| {
+                allocator.free(command);
             }
             allocator.free(c.command);
         }

@@ -176,13 +176,12 @@ pub fn main(init: std.process.Init) !u8 {
         };
     }
 
-    const out_terminal: std.Io.Terminal = .{
-        .writer = stderr,
-        .mode = .escape_codes,
-    };
     var diagnostics: aro.Diagnostics = .{
         .output = .{
-            .to_writer = out_terminal,
+            .to_writer = .{
+                .writer = stderr,
+                .mode = .escape_codes,
+            },
         },
     };
     defer diagnostics.deinit();
@@ -216,7 +215,7 @@ pub fn main(init: std.process.Init) !u8 {
         windows_crt.disable_crlf_translations();
     }
 
-    return protocol.run(init.io, init.gpa, out_terminal, &compilation);
+    return protocol.run(init.io, init.gpa, &compilation);
 }
 
 fn printHelp(writer: *std.Io.Writer) !void {
