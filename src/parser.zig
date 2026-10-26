@@ -558,6 +558,18 @@ fn get_type(
             return error.CannotHandleType;
         },
         .@"enum" => |enum_type| blk: {
+            const enum_name = enum_type.name.lookup(compilation);
+
+            // Like structs, a named enum that already has a symbol becomes a named reference instead of being expanded inline.
+            // This is required for aliases (`typedef enum E E;`) to resolve to the enum symbol and matches the pointer/struct handling
+            if (get_named_type(symbols, enum_name)) |named| {
+                break :blk .{
+                    .is_mutable = !qt_in.@"const",
+                    .tag = .named,
+                    .u = .{ .named = named },
+                };
+            }
+
             var out_enum: fip.Type.Enum = .{
                 .bit_width = 32,
                 .is_signed = true,
@@ -570,16 +582,17 @@ fn get_type(
                     &.{};
             if (values.len > 0) {
                 out_enum.values = values.ptr;
+                @memset(std.mem.sliceAsBytes(values), 0);
             }
 
-            const enum_name = enum_type.name.lookup(compilation);
+            // Copy enum name
             @memcpy(out_enum.name[0..@min(enum_name.len, 127)], enum_name);
-
-            for (enum_type.fields, values) |*field, *value| {
-                // TODO: Set fields of enum values
-                _ = field;
-                _ = value;
+            if (enum_name.len < 127) {
+                out_enum.name[@min(enum_name.len, 127)] = '\x00';
             }
+
+            // Values cannot be recovered from aro.Type.Enum alone.
+            _ = enum_type.fields;
 
             break :blk .{
                 .is_mutable = !qt_in.@"const",

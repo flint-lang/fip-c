@@ -148,12 +148,14 @@ pub fn handle_symbol_request(message: *const fip.Message) void {
     const symbol_response: *fip.Message.SymbolResponse = &response.u.symbol_response;
     @memcpy(symbol_response.module_name[0..main.MODULE_NAME.len], main.MODULE_NAME);
 
+    var resolver: fip.Resolver = .{ .get_type = resolve_type_name };
+
     fip.print(main.ID, .debug, "symbol_list.count=%lu", symbol_collections.len);
     symbol_response.found =
         blk: for (symbol_collections) |*collection| {
             fip.print(main.ID, .debug, "collection->symbol_count=%lu", collection.symbols.len);
             for (collection.symbols) |*symbol| {
-                if (symbol.sig.equals(&symbol_request.sig)) {
+                if (symbol.sig.equals(&symbol_request.sig, &resolver)) {
                     collection.needed = true;
                     symbol.sig.clone(&symbol_response.sig);
                     break :blk true;
@@ -375,6 +377,19 @@ pub fn handle_tag_request(message: *const fip.Message) error{MasterDied}!void {
         },
     };
     fip.slave.send_message(&response, main.ID);
+}
+
+fn resolve_type_name(name: []const u8) ?*const fip.Signature {
+    for (symbol_collections) |*collection| {
+        for (collection.symbols) |*symbol| {
+            if (symbol.get_name()) |symbol_name| {
+                if (std.mem.eql(u8, symbol_name, name)) {
+                    return &symbol.sig;
+                }
+            }
+        }
+    }
+    return null;
 }
 
 test "refAllDecls" {
