@@ -74,6 +74,9 @@ pub fn run(io: std.Io, allocator: std.mem.Allocator, compilation: *aro.Compilati
     var ast_file_writer = ast_file.writer(io, &.{});
     const ast_file_stream = &ast_file_writer.interface;
 
+    // Generate builtin macros once per compilation
+    const builtin_macros = try compilation.generateBuiltinMacros(.include_system_defines);
+
     for (main.configs, symbol_collections) |*config, *collection| {
         fip.print(main.ID, .debug, "[%s]", &config.tag);
         for (config.headers) |header| {
@@ -81,7 +84,7 @@ pub fn run(io: std.Io, allocator: std.mem.Allocator, compilation: *aro.Compilati
 
             const start: std.Io.Timestamp = .now(io, .real);
             try ast_file_stream.print("==== BEGIN OF FILE '{s}' ====\n", .{header});
-            parser.parse_file(allocator, ast_file_stream, compilation, header, collection, &config.tag) catch |err| {
+            parser.parse_file(allocator, ast_file_stream, compilation, builtin_macros, header, collection, &config.tag) catch |err| {
                 fip.print(main.ID, .debug, "parsing header '%s' failed...", header.ptr);
                 collection.errored = true;
                 return err;

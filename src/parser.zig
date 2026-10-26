@@ -11,6 +11,7 @@ pub fn parse_file(
     allocator: std.mem.Allocator,
     ast_file_stream: *std.Io.Writer,
     compilation: *aro.Compilation,
+    builtin_macros: aro.Source,
     file_path: []const u8,
     collection: *main.CSymbolCollection,
     config_tag: *const [fip.NAME_SIZE:0]u8,
@@ -18,7 +19,6 @@ pub fn parse_file(
     var preproc = try aro.Preprocessor.init(compilation, .testing);
     defer preproc.deinit();
     try preproc.addBuiltinMacros();
-    const builtin_macros = try compilation.generateBuiltinMacros(.include_system_defines);
     _ = try preproc.preprocess(builtin_macros);
 
     const source = try compilation.addSourceFromPath(file_path);
