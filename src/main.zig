@@ -230,6 +230,12 @@ fn printHelp(writer: *std.Io.Writer) !void {
         .description_on_new_line = false,
         .max_width = 100,
     });
+    try writer.writeAll(
+        \\
+        \\The 'fip-c' slave is only allowed to be executed by an master program as it communicates via stdin/stdout with
+        \\the master. You should not execute this program manually, as it is essentially useless without a running master.
+        \\
+    );
     try writer.flush();
 }
 
