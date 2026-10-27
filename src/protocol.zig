@@ -84,7 +84,8 @@ pub fn run(io: std.Io, allocator: std.mem.Allocator, compilation: *aro.Compilati
 
             const start: std.Io.Timestamp = .now(io, .real);
             try ast_file_stream.print("==== BEGIN OF FILE '{s}' ====\n", .{header});
-            parser.parse_file(allocator, ast_file_stream, compilation, builtin_macros, header, collection, &config.tag) catch |err| {
+            std.debug.assert(header[header.len - 1] == '\x00');
+            parser.parse_file(allocator, ast_file_stream, compilation, builtin_macros, header[0..(header.len - 1)], collection, &config.tag) catch |err| {
                 fip.print(main.ID, .debug, "parsing header '%s' failed...", header.ptr);
                 collection.errored = true;
                 return err;
