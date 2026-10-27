@@ -80,22 +80,23 @@ pub fn run(io: std.Io, allocator: std.mem.Allocator, compilation: *aro.Compilati
     for (main.configs, symbol_collections) |*config, *collection| {
         fip.print(main.ID, .debug, "[%s]", &config.tag);
         for (config.headers) |header| {
-            fip.print(main.ID, .debug, "parsing header '%s'...", header.ptr);
+            const header_len: c_int = @intCast(header.len);
+            fip.print(main.ID, .debug, "parsing header '%.*s'...", header_len, header.ptr);
 
             const start: std.Io.Timestamp = .now(io, .real);
             try ast_file_stream.print("==== BEGIN OF FILE '{s}' ====\n", .{header});
-            std.debug.assert(header[header.len - 1] == '\x00');
-            parser.parse_file(allocator, ast_file_stream, compilation, builtin_macros, header[0..(header.len - 1)], collection, &config.tag) catch |err| {
-                fip.print(main.ID, .debug, "parsing header '%s' failed...", header.ptr);
+            parser.parse_file(allocator, ast_file_stream, compilation, builtin_macros, header, collection, &config.tag) catch |err| {
+                fip.print(main.ID, .debug, "parsing header '%.*s' failed...", header_len, header.ptr);
                 collection.errored = true;
                 return err;
             };
             try ast_file_stream.print("===== END OF FILE '{s}' =====\n", .{header});
             const parse_time = @as(f64, @floatFromInt(start.untilNow(io, .real).toNanoseconds())) / std.time.ns_per_s;
-            fip.print(main.ID, .debug, "parsing '%s' took %f s", header.ptr, parse_time);
+            fip.print(main.ID, .debug, "parsing '%.*s' took %f s", header_len, header.ptr, parse_time);
         }
         for (config.command, 0..) |command, i| {
-            fip.print(main.ID, .debug, "  command[%lu] = \"%s\"", i, command.ptr);
+            const command_len: c_int = @intCast(command.len);
+            fip.print(main.ID, .debug, "  command[%lu] = \"%.*s\"", i, command_len, command.ptr);
         }
         fip.print(main.ID, .debug, "  output     = \"%s\"", &config.output);
     }
@@ -222,7 +223,7 @@ pub fn compile_module(
         return false;
     }
 
-    fip.print(main.ID, .info, "Compiled '%s' successfully", &hash);
+    fip.print(main.ID, .info, "Compiled '%s' successfully", hash.ptr);
     // Add to paths array. For this we need to find the first null-byte character in the paths array, that's where
     // we will place our hash at. The good thing is that we only need to check multiples of 8 so this check is rather easy.
     // Because we know how many paths there already are in the paths string we can just offset by
@@ -230,7 +231,7 @@ pub fn compile_module(
     const offset: usize = path_count.* * fip.PATH_SIZE;
     if (offset >= fip.PATHS_SIZE) {
         fip.print(main.ID, .@"error", "The Paths array is full: %.*s", @as(i32, fip.PATHS_SIZE), paths);
-        fip.print(main.ID, .@"error", "Could not store hash '%s' in it", &hash);
+        fip.print(main.ID, .@"error", "Could not store hash '%s' in it", hash.ptr);
         return false;
     }
     @memcpy(paths[offset..(offset + fip.PATH_SIZE)], hash);
