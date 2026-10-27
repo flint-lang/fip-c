@@ -94,10 +94,25 @@ pub fn parse_file(
                         continue;
                     }
                 }
+
+                // Resolve the typedef'd type
+                var alias_type: fip.Type = undefined;
+                try get_type(compilation, symbols, &typedef.qt, &alias_type);
+
+                // Common pattern: typedef void* Handle; should be exposed as a named opaque
+                if (alias_type.tag == .pointer and
+                    alias_type.u.pointer.base_type.tag == .primitive and
+                    alias_type.u.pointer.base_type.u.primitive == .void)
+                {
+                    symbol.sig.tag = .@"opaque";
+                    symbol.set_name(name);
+                    continue;
+                }
+
                 // It is a type alias
                 symbol.sig.tag = .alias;
                 symbol.set_name(name);
-                try get_type(compilation, symbols, &typedef.qt, &symbol.sig.u.alias.type);
+                symbol.sig.u.alias.type = alias_type;
             },
             .variable => |variable| {
                 std.debug.print("Found variable: {s}\n", .{tree.tokSlice(variable.name_tok)});
