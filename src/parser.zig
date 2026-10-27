@@ -365,7 +365,7 @@ fn get_type(
                         return error.CannotHandleType;
                     },
                     .float, .float32 => .f32,
-                    .double, .float64 => .f32,
+                    .double, .float64 => .f64,
                     .long_double => {
                         fip.print(main.ID, .@"error", "FIP cannot handle 'long double' types");
                         return error.CannotHandleType;
