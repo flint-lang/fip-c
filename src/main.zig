@@ -10,7 +10,7 @@ const parser = @import("parser.zig");
 
 pub const MODULE_NAME = "fip-c";
 
-pub export var LOG_LEVEL: fip.LogLevel = if (builtin.mode == .Debug) .debug else .warn;
+pub export var LOG_LEVEL: fip.LogLevel = if (builtin.optimize == .debug) .debug else .warn;
 
 /// fip_module_config_t
 pub const ModuleConfig = struct {
@@ -130,7 +130,7 @@ pub fn main(init: std.process.Init) !u8 {
     }
     if (res.args.version != 0) {
         try stdout.print("{s} v{s} ({s}, {s})", .{ MODULE_NAME, defines.version, defines.hash, defines.date });
-        if (builtin.mode == .Debug) {
+        if (builtin.optimize == .debug) {
             try stdout.print(" [debug]", .{});
         }
         try stdout.print("\n └─ Flint Interop Protocol v{d}.{d}.{d}\n", .{ fip.MAJOR, fip.MINOR, fip.PATCH });

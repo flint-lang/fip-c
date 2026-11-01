@@ -363,6 +363,14 @@ fn get_type(
                         fip.print(main.ID, .@"error", "FIP cannot hanlde uint128 types");
                         return error.CannotHandleType;
                     },
+                    .int24 => {
+                        fip.print(main.ID, .@"error", "FIP cannot hanlde int24 types");
+                        return error.CannotHandleType;
+                    },
+                    .uint24 => {
+                        fip.print(main.ID, .@"error", "FIP cannot hanlde uint24 types");
+                        return error.CannotHandleType;
+                    },
                 },
             },
         },
@@ -420,6 +428,18 @@ fn get_type(
                 },
             },
         },
+        .storage_float => |storage_float| .{
+            .is_mutable = !qt_in.@"const",
+            .tag = .primitive,
+            .u = .{
+                .primitive = switch (storage_float) {
+                    .mfp8 => {
+                        fip.print(main.ID, .@"error", "FIP cannot handle 'mfp8' types");
+                        return error.CannotHandleType;
+                    },
+                },
+            },
+        },
         .complex => {
             fip.print(main.ID, .@"error", "FIP cannot handle complex types");
             return error.CannotHandleType;
@@ -433,6 +453,11 @@ fn get_type(
             return error.CannotHandleType;
         },
 
+        .block => {
+            // Block types are a clang extension to provide lambda expression-like syntax
+            fip.print(main.ID, .@"error", "FIP cannot handle block types");
+            return error.CannotHandleType;
+        },
         .func => {
             fip.print(main.ID, .@"error", "FIP cannot handle function types");
             return error.CannotHandleType;
@@ -625,7 +650,6 @@ fn get_type(
             }
         else
             return try get_type(compilation, symbols, &typedef.base, out),
-        .attributed => |attributed| return try get_type(compilation, symbols, &attributed.base, out),
     };
 }
 

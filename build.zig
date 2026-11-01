@@ -44,7 +44,7 @@ pub fn build(b: *std.Build) !void {
     defines.addOption([]const u8, "version", @import("build.zig.zon").version);
     defines.addOption([]const u8, "hash", commit_hash);
     defines.addOption([]const u8, "date", build_date);
-    if (aro_dep.builder.build_root.handle.openDir(b.graph.io, "include", .{ .iterate = true })) |aro_files_dir| {
+    if (aro_dep.builder.root.root_dir.handle.openDir(b.graph.io, "include", .{ .iterate = true })) |aro_files_dir| {
         defer aro_files_dir.close(b.graph.io);
         var aro_file_names: std.ArrayList([]const u8) = .empty;
         var aro_file_contents: std.ArrayList([]const u8) = .empty;

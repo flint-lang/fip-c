@@ -2,19 +2,19 @@
     .name = .fip_zig,
     .version = "0.4.2-0",
     .fingerprint = 0xec2ce9b40b00cd8,
-    .minimum_zig_version = "0.16.0",
+    .minimum_zig_version = "0.17.0",
     .dependencies = .{
         .aro = .{
-            .url = "git+https://github.com/Vexu/arocc.git#5f5a050569a95ecc40a426f0c3666ae7ef987ede",
-            .hash = "aro-0.0.0-JSD1Qi7QNgDnfcrdEJf82v3o6MhZySjYVrtdfEf3E4Se",
+            .url = "git+https://github.com/Vexu/arocc.git#c12999712585f9d67acc290c4ba51e89ec1d7fb5",
+            .hash = "aro-0.0.0-JSD1QieDNwCxnCLH968EXw7cC_HFWpJ1Km0J6B_8gNzM",
         },
         .fip = .{
-            .url = "git+https://github.com/flint-lang/fip.git#1b9d46c66a946e02ce2faa0c4acfc5a68676e109",
-            .hash = "fip-0.4.1-jXH3OW7oAgBnItySFP9uUoUB_q2IPTmsbVSofFXZUTwa",
+            .url = "git+https://github.com/flint-lang/fip.git#306dc342e37258832bdc216c049cd3cdaa312245",
+            .hash = "fip-0.4.1-jXH3OV_oAgBzsf1MwFW1bfnemaM6u9wd3lgM5Fdpxxpo",
         },
         .clap = .{
-            .url = "https://github.com/Hejsil/zig-clap/archive/refs/tags/0.12.0.tar.gz",
-            .hash = "clap-0.12.0-oBajB7foAQDqlSwaSG5g0yq7xGbQARUsBk5T64gAOqP5",
+            .url = "git+https://github.com/Hejsil/zig-clap#05faf3905e8548f5cc269a8836e154065e70128d",
+            .hash = "clap-0.12.0-oBajB4XpAQCF1WRKnD5KOKPsnwwT_NNdAJ7Ww3irYJac",
         },
     },
     .paths = .{""},
