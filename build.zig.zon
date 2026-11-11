@@ -1,7 +1,7 @@
 .{
-    .name = .fip_zig,
+    .name = .fip_c,
     .version = "0.4.2-0",
-    .fingerprint = 0xec2ce9b40b00cd8,
+    .fingerprint = 0x2b17d450b8374cfe,
     .minimum_zig_version = "0.17.0",
     .dependencies = .{
         .aro = .{
