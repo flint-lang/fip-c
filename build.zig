@@ -19,31 +19,32 @@ pub fn build(b: *std.Build) !void {
         .optimize = optimize,
     });
 
-    const commit_hash: []const u8 = std.mem.trim(
-        u8,
-        b.run(&[_][]const u8{ "git", "rev-parse", "--short", "HEAD" }),
-        &std.ascii.whitespace,
-    );
-    std.debug.print("-- Commit Hash is {s}\n", .{commit_hash});
-
-    const build_date: []const u8 = blk: {
-        const current_timestamp: u64 = @intCast(std.Io.Timestamp.now(b.graph.io, .real).toSeconds());
-        const epoch_seconds: std.time.epoch.EpochSeconds = .{ .secs = current_timestamp };
-        const epoch_day = epoch_seconds.getEpochDay();
-        const year_day = epoch_day.calculateYearDay();
-        const month_day = year_day.calculateMonthDay();
-        break :blk b.fmt("{d}-{d:0>2}-{d:0>2}", .{
-            year_day.year,
-            month_day.month.numeric(),
-            month_day.day_index + 1, // day_index is 0-based
-        });
+    const commit_hash = b.option([]const u8, "commit-hash", "fip-c git revision") orelse blk: {
+        const git_exe_path: []const u8 = b.findProgram(.{ .names = &.{"git"} }) orelse
+            break :blk "unknown";
+        break :blk std.mem.trim(
+            u8,
+            b.run(&.{ git_exe_path, "rev-parse", "--short", "HEAD" }),
+            &std.ascii.whitespace,
+        );
     };
-    std.debug.print("-- Build Date is {s}\n", .{build_date});
+    std.debug.print("-- Commit Hash is {q}\n", .{commit_hash});
+
+    const commit_date = b.option([]const u8, "commit-date", "Date of last commit") orelse blk: {
+        const git_exe_path: []const u8 = b.findProgram(.{ .names = &.{"git"} }) orelse
+            break :blk "unknown";
+        break :blk std.mem.trim(
+            u8,
+            b.run(&[_][]const u8{ git_exe_path, "log", "-1", "--date=format:%Y-%m-%d", "--format=%cd" }),
+            &std.ascii.whitespace,
+        );
+    };
+    std.debug.print("-- Commit Date is {s}\n", .{commit_date});
 
     var defines = b.addOptions();
     defines.addOption([]const u8, "version", @import("build.zig.zon").version);
     defines.addOption([]const u8, "hash", commit_hash);
-    defines.addOption([]const u8, "date", build_date);
+    defines.addOption([]const u8, "date", commit_date);
     if (aro_dep.builder.root.root_dir.handle.openDir(b.graph.io, "include", .{ .iterate = true })) |aro_files_dir| {
         defer aro_files_dir.close(b.graph.io);
         var aro_file_names: std.ArrayList([]const u8) = .empty;
